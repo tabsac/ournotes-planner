@@ -9,7 +9,13 @@ setWorkerBridgeEnabled(false);
 const encoder = new TextEncoder();
 let schemas;
 
-function finish(shared, value) {
+function finish(shared, value, id) {
+  // 没有 shared 时走「异步回传」路径：给 python-worker 的驱动循环用，
+  // 那样就不需要 SharedArrayBuffer 了。
+  if (!shared) {
+    self.postMessage({type: 'solved', id, value});
+    return;
+  }
   const control = new Int32Array(shared, 0, 2);
   const bytes = encoder.encode(JSON.stringify(value));
   if (bytes.byteLength > shared.byteLength - 8) {
@@ -33,7 +39,7 @@ async function loadSchemas() {
 }
 
 self.onmessage = async event => {
-  const {raw, shared} = event.data;
+  const {raw, shared, id} = event.data;
   try {
     const types = await loadSchemas();
     const request = JSON.parse(raw);
@@ -45,9 +51,9 @@ self.onmessage = async event => {
     if (!validation.ok) throw new Error('CP-SAT 模型校验失败：' + validation.message);
     const bytes = await CpSat.solveRaw(encoded, await encodeParams(request.parameters));
     const response = types.response.toObject(types.response.decode(bytes), {longs: String, enums: Number, defaults: true});
-    finish(shared, {status: response.status, solution: response.solution, solutionInfo: response.solutionInfo});
+    finish(shared, {status: response.status, solution: response.solution, solutionInfo: response.solutionInfo}, id);
   } catch (error) {
-    finish(shared, {error: '浏览器求解失败：' + error.message});
+    finish(shared, {error: '浏览器求解失败：' + error.message}, id);
   }
 };
 

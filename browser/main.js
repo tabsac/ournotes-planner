@@ -21,10 +21,21 @@ async function ensureIsolation() {
   await navigator.serviceWorker.register(new URL('service-worker.js', baseURL), {scope});
   await navigator.serviceWorker.ready;
   if (!navigator.serviceWorker.controller) {
-    await new Promise(resolve => navigator.serviceWorker.addEventListener('controllerchange', resolve, {once: true}));
+    // 注册后本页不一定马上被接管。实测手机 WebView 上会一直等不到 controllerchange，
+    // 页面就永远停在「正在准备首次运行」。加个上限：超时就当没有隔离继续，
+    // 因为求解器（打过 pthread 池补丁后）已经不依赖跨源隔离了，最坏只是少一层加速。
+    await Promise.race([
+      new Promise(resolve => navigator.serviceWorker.addEventListener('controllerchange', resolve, {once: true})),
+      new Promise(resolve => setTimeout(resolve, 5000)),
+    ]);
   }
   if (sessionStorage.getItem(flag)) {
-    throw new Error('浏览器未能启用计算环境。请用电脑的近期 Chrome 或 Edge 打开，并允许此网站保存数据。');
+    // SharedArrayBuffer 不再是完整搜索的前提：求解桥已经改成 await 驱动
+    // （见 python-worker.js 的 solveAsync / cp_model.py 的 NeedSolve），
+    // 所以拿不到跨源隔离也照常启动 —— 多数手机自带浏览器就是这种情况。
+    // 唯一会退回较慢通道的是「取消」：改用 postMessage 通知计算进程。
+    console.warn('未能启用跨源隔离：完整搜索不受影响，取消信号改走消息通道。');
+    return;
   }
   sessionStorage.setItem(flag, '1');
   location.reload();
@@ -152,7 +163,11 @@ async function start() {
     try {
       await persisted;
       await restoreCache();
-      sharedCancel = new SharedArrayBuffer(4);
+      // 取消标志首选 SharedArrayBuffer：Python 在同步计算中也能读到它。
+      // 手机自带浏览器没有 SAB，于是退回 postMessage 通道（见 python-worker.js
+      // 顶部的 type:'cancel' 分支）—— 计算进程在 await 求解时事件循环是空的，
+      // 能及时收到；取消的只是「求解中途」这一个代价最高的阶段。
+      sharedCancel = typeof SharedArrayBuffer === 'undefined' ? null : new SharedArrayBuffer(4);
       job = {id: crypto.randomUUID(), status: 'running', stage: '核对实际养成与数据', done: 0, total: 1};
       const id = job.id;
       rpc('optimize', body, {jobId: id, cancel: sharedCancel}).then(async value => {
@@ -176,6 +191,7 @@ async function start() {
     if (path === '/api/optimize') return optimize(body);
     if (path === `/api/jobs/${job?.id}/cancel`) {
       if (sharedCancel) Atomics.store(new Int32Array(sharedCancel), 0, 1);
+      else worker.postMessage({type: 'cancel'});
       terminateSolver();
       return {requested: true};
     }

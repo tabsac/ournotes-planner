@@ -169,18 +169,52 @@ class CpModel:
         return ""  # The WASM solver validates the serialized model before solving.
 
 
+class NeedSolve(Exception):
+    """把「这个模型还没解过」抛出 Python 世界，交给外层（JS）去解。
+
+    浏览器里外层是 python-worker，它本来就能 await 异步求解 ——
+    于是不再需要 SharedArrayBuffer 做同步桥。
+    """
+
+
+# 待解请求的暂存处。JS 侧读它拿到模型，解完写进自己的缓存，再重跑一次 invoke。
+pending_solve = {}
+
+
 class CpSolver:
     def __init__(self):
         self.parameters = SimpleNamespace(num_search_workers=1, random_seed=19471)
         self.solution = None
 
     def solve(self, model):
-        from js import browser_solve
         import planner_core as p
         raw = json.dumps({"model": model.model, "parameters": {
             "numSearchWorkers": self.parameters.num_search_workers,
             "randomSeed": self.parameters.random_seed}}, separators=(",", ":"))
-        response = json.loads(str(browser_solve(raw)))
+
+        # 优先走「外层驱动」：JS 提供按 key 查解的缓存函数 browser_solve_cached。
+        # 命中 -> 直接拿结果；未命中 -> 抛出待解请求，让 JS 解完再重跑。
+        # JS 还没提供该函数时，回落到老路径（browser_solve，靠 SAB 同步阻塞），
+        # 这样 App 在移植过程中不会崩。
+        try:
+            from js import browser_solve_cached
+        except ImportError:
+            browser_solve_cached = None
+
+        if browser_solve_cached is None:
+            from js import browser_solve
+            response = json.loads(str(browser_solve(raw)))
+        else:
+            import hashlib
+            key = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+            cached = browser_solve_cached(key)
+            if cached:
+                response = json.loads(str(cached))
+            else:
+                pending_solve["key"] = key
+                pending_solve["raw"] = raw
+                raise NeedSolve(key)
+
         if response.get("cancelled"):
             raise p.Cancelled()
         if response.get("error"):

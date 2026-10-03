@@ -390,6 +390,48 @@ window.PlannerAccount = {
     print(json.dumps({k: v for k, v in report.items() if k not in ("payload_files", "static_files")}, ensure_ascii=False))
 
 
+def patch_solver_runtime(dist):
+    """把 or-tools-wasm 的浏览器运行时改成「不建 pthread 线程池」。
+
+    or-tools-wasm 的浏览器构建是 emscripten 的 pthread 构建：模块初始化时**无条件**
+    先建一个 4 个 worker 的线程池（`PThread.initMainThread`），把 wasm 的
+    SharedArrayBuffer 内存 transfer 给它们，并把 `loading-workers` 记成一道 run
+    dependency。没有跨源隔离的浏览器（手机自带浏览器 / WebView —— 实测即使服务端
+    发真 COOP+COEP，`crossOriginIsolated` 仍是 false）在这一步必抛：
+
+        DataCloneError: Failed to execute 'postMessage' on 'Worker':
+        SharedArrayBuffer transfer requires self.crossOriginIsolated.
+
+    然后模块永远卡在那道 run dependency 上，求解器再也回不了消息 ——
+    表现是「精确求解中…」之后彻底不动。or-tools-wasm 自己的 README 也写着
+    *"Browser builds require cross-origin isolation headers for WebAssembly threads."*
+
+    本项目的求解一律 `numSearchWorkers=1`（见 browser_runtime.native_solve），
+    用不到真线程。把池子开成 0 之后 `loadWasmModuleToAllWorkers()` 变成
+    `Promise.all([])`：不建 worker、不 transfer、也就没有那道 dependency。
+
+    真机实测（Android 11 / WebView 124，`crossOriginIsolated=false`、无 SAB）：
+        池=4 → 求解请求 90 秒无任何响应（模块卡死）；
+        池=0 → 38 秒返回 status=4（OPTIMAL）。
+
+    上游一旦改掉这段写法，这里会直接报错，而不是悄悄放过一个跑不动的构建。
+    """
+    assets = dist / "assets"
+    patched = []
+    for path in sorted(assets.glob("cp_sat_runtime*.js")):
+        text = path.read_text("utf-8")
+        if "var pthreadPoolSize=0;" in text:
+            patched.append(path.name)
+            continue
+        if "var pthreadPoolSize=4;" not in text:
+            raise ValueError(f"求解器运行时里找不到 pthread 池定义，or-tools-wasm 可能已升级：{path.name}")
+        path.write_text(text.replace("var pthreadPoolSize=4;", "var pthreadPoolSize=0;"), "utf-8")
+        patched.append(path.name)
+    if not patched:
+        raise ValueError("dist/assets 下没有 cp_sat_runtime*.js，求解器补丁没能生效")
+    print("solver runtime patched (pthread pool -> 0): " + ", ".join(patched))
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--build", action="store_true", help="Also build the prepared site with Vite")
@@ -397,3 +439,4 @@ if __name__ == "__main__":
     main()
     if args.build:
         subprocess.run(["node", str(HERE / "node_modules/vite/bin/vite.js"), "build"], cwd=HERE, check=True)
+        patch_solver_runtime(HERE / "dist")
