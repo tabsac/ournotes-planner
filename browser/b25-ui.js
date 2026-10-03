@@ -377,7 +377,7 @@ export async function exportB25(record, extras) {
     const PAD = 44, GAP = 18;
     // 卡高必须容得下：徽章行(38) + 封面(184) + 曲名(30) + 数值(28) + 脚注(20) + 下边距
     const CARD_W = 268, CARD_H = 348;
-    const HEAD = 160, FOOT = 96;   // 176 x 0.9
+    const HEAD = 144, FOOT = 96;   // 160 x 0.9（head 整体再缩 0.9）
     const rows = Math.ceil(entries.length / COLUMNS);
     const width = PAD * 2 + CARD_W * COLUMNS + GAP * (COLUMNS - 1);
     const height = HEAD + rows * CARD_H + (rows - 1) * GAP + FOOT;
@@ -408,6 +408,14 @@ export async function exportB25(record, extras) {
     }
 
     // ---- 头部：用户信息（左，放大）+ 牌子与最高分（紧挨着）+ Rating（最右），同一行 ----
+    // head 整体再缩 0.9 倍：左上角钉在 PAD 不动，右边缘靠 HRIGHT 补偿回来，
+    // 这样头部内容和卡片网格左右对齐，不会在一侧留出空档。
+    const HS = 0.9;
+    const HT = PAD * (1 - HS);
+    const HRIGHT = (width - PAD - HT) / HS;
+    ctx.save();
+    ctx.translate(HT, HT);
+    ctx.scale(HS, HS);
     const avatarSize = 104;   // 116 x 0.9
     const avatarId2 = info.avatar_card_id || info.favorite_card_id;
     const avatar = avatarId2 ? await loadImage(`./avatar-images/avatar-${avatarId2}.webp`) : null;
@@ -464,14 +472,14 @@ export async function exportB25(record, extras) {
     ctx.textAlign = "right";
     ctx.fillStyle = "#a5a3bf";
     ctx.font = "15px system-ui, 'Microsoft YaHei', sans-serif";
-    ctx.fillText("Rating", width - PAD, PAD + 4);
+    ctx.fillText("Rating", HRIGHT, PAD + 4);
     ctx.fillStyle = "#ffd66b";
     ctx.font = "bold 56px system-ui, 'Microsoft YaHei', sans-serif";
-    ctx.fillText(num(stats.rating_avg), width - PAD, PAD + 24);
+    ctx.fillText(num(stats.rating_avg), HRIGHT, PAD + 24);
     ctx.fillStyle = "#8f8da8";
     ctx.font = "14px system-ui, 'Microsoft YaHei', sans-serif";
-    ctx.fillText(ratingText, width - PAD, PAD + 92);
-    const ratingLeft = width - PAD - Math.max(ctx.measureText(ratingText).width, 120);
+    ctx.fillText(ratingText, HRIGHT, PAD + 92);
+    const ratingLeft = HRIGHT - Math.max(ctx.measureText(ratingText).width, 120);
     ctx.textAlign = "left";
 
     const total = stats.total_rating ?? 0;
@@ -505,6 +513,7 @@ export async function exportB25(record, extras) {
     ctx.font = "bold 25px system-ui, sans-serif";
     ctx.fillText(int(total), hsrX + hsrW - 16, hsrY + 46);
     ctx.textAlign = "left";
+    ctx.restore();   // 结束 head 的 0.9 倍缩放
 
     // ---- 卡片 ----
     const images = await Promise.all(entries.map(e => loadImage(jacketUrl(e))));
