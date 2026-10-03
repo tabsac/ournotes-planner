@@ -412,9 +412,10 @@ export async function exportB25(record, extras) {
     // 这样头部内容和卡片网格左右对齐，不会在一侧留出空档。
     const HS = 0.9;
     const HT = PAD * (1 - HS);
+    const HUP = 5;                       // head 整体再上移 5px
     const HRIGHT = (width - PAD - HT) / HS;
     ctx.save();
-    ctx.translate(HT, HT);
+    ctx.translate(HT, HT - HUP);
     ctx.scale(HS, HS);
     const avatarSize = 104;   // 116 x 0.9
     const avatarId2 = info.avatar_card_id || info.favorite_card_id;
