@@ -68,6 +68,43 @@ def native_solve(self, cm):
 
 
 ss.Search.native_solve = native_solve
+
+
+upstream_save = ss.Search.save
+
+
+def browser_save(self, status="running"):
+    """重启不许把「本作业已保存的进度」抹掉。
+
+    求解桥是「重启 + 记忆化」：每次 NeedSolve 之后 Python 会**从头重跑**，
+    于是 self.prepared_keys / self.step_keys / self.completed 都从零重建。
+    如果取消正好落在 await 求解期间，重启后的 run() 会在 build() 的第一次
+    check() 就退出 —— 那次 save("cancelled") 会写下空进度，
+    可那些证明其实还在缓存里、恢复时也照样复用
+    （验收用例 check_lifecycle.cjs 的 saved_steps / saved_sheets 就是这么挂掉的）。
+
+    这里把上一个检查点里**属于同一个作业（run_id）**的进度并回来，并且只影响
+    写出去的内容，不动内存里的活状态（否则重走时会重复计数）。
+    交出去之前 SearchCache.last_checkpoint() 会逐个 key 回查缓存、
+    已经不存在的会被剔掉，所以并回来只会更接近事实，不会凭空多报。
+    """
+    if not self.cache:
+        return upstream_save(self, status)
+    previous = self.cache.last_checkpoint() or {}
+    if previous.get("job_id") != self.run_id:
+        return upstream_save(self, status)
+    join = lambda live, saved: list(dict.fromkeys(list(live) + list(saved or [])))
+    live = (self.prepared_keys, self.step_keys, self.completed)
+    self.prepared_keys = join(self.prepared_keys, previous.get("keys"))
+    self.step_keys = join(self.step_keys, previous.get("step_keys"))
+    self.completed = max(self.completed, int(previous.get("completed_steps") or 0))
+    try:
+        return upstream_save(self, status)
+    finally:
+        self.prepared_keys, self.step_keys, self.completed = live
+
+
+ss.Search.save = browser_save
 data = BrowserData()
 cache = BrowserCache("/state")
 

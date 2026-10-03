@@ -259,11 +259,16 @@ const profileStore = createProfileStorage(STORE, () => {
     app = replace_once(app, 'if (jobId || startingJob || updatingSoftware) return;', 'if (jobId || startingJob || updatingSoftware || profileStore.outOfDate) return;')
     app = app.replace("fetch(", "window.plannerFetch(")
     app = replace_once(app, 'if (e.target.matches?.(".card-art img")) e.target.parentElement.classList.add("image-failed");', '''if (e.target.matches?.(".card-art img")) {
-    const image = e.target, retries = Number(image.dataset.imageRetries || 0);
+    const image = e.target;
+    // 已经退到卡图占位图就别再碰它：占位图是 data: URI，往它后面拼 ?image_retry=N
+    // 会把 SVG 内容弄坏（实测 0x0、直接 error），兜底反而变成破图。
+    if (image.dataset.cardFallback) return;
+    const retries = Number(image.dataset.imageRetries || 0);
     if (retries < 2) {
       image.dataset.imageRetries = String(retries + 1);
       setTimeout(() => {
-        if (!image.isConnected) return;
+        if (!image.isConnected || image.dataset.cardFallback) return;
+        if (!/card-images\\//.test(image.getAttribute("src") || "")) return;
         const url = new URL(image.src); url.searchParams.set('image_retry', String(retries + 1));
         image.src = url.href;
       }, 750 * (retries + 1));
@@ -274,6 +279,26 @@ const profileStore = createProfileStorage(STORE, () => {
     start = app.index("function softwareMessage(")
     end = app.index("async function calculate(", start)
     app = app[:start] + app[end:]
+    # 进度里的「已等待 N 秒」不能只靠后端发来的 elapsed_seconds：求解阶段后端不再发
+    # 进度事件，那个值会一直停在最后一次事件上。手机上一轮求解要等 1~2 分钟，
+    # 用户看到的就是一个不动的计数器 —— 「卡住了」和「正在算第 38 秒」是两种体验。
+    # 这里本地再走一只秒表，与后端值取较大者：计数只增不减，且求解期间也在动。
+    app = replace_once(
+        app, 'async function calculate(existingJob=null) {',
+        '''let jobStartedAt = 0;
+/** 「已等待」秒数：以后端 elapsed_seconds 为准，但它只在有进度事件时才更新，
+ *  所以与本地秒表取较大者 —— 单调，且在求解期间照样走。 */
+function waitedSeconds(job) {
+  return Math.floor(Math.max(job.elapsed_seconds || 0, (performance.now() - jobStartedAt) / 1000));
+}
+async function calculate(existingJob=null) {''')
+    app = replace_once(
+        app, 'startingJob = true; cancelRequested = false; clearTimeout(growthTimer);',
+        'startingJob = true; jobStartedAt = performance.now(); cancelRequested = false; clearTimeout(growthTimer);')
+    app = replace_once(app, '已等待 ${fmt(Math.floor(job.elapsed_seconds || 0))} 秒',
+                            '已等待 ${fmt(waitedSeconds(job))} 秒')
+    app = replace_once(app, "${job.elapsed_seconds ? ` · 已等待 ${fmt(Math.floor(job.elapsed_seconds))} 秒` : ''}",
+                            "${waitedSeconds(job) ? ` · 已等待 ${fmt(waitedSeconds(job))} 秒` : ''}")
     for line in ('  $("updateControls").disabled = on || updatingSoftware || !softwareInfo?.supported;\n',
                  '  $("exitSoftware").disabled = on || updatingSoftware;\n',
                  '    await initSoftwareUpdate();\n', '    softwareBusy(updatingSoftware);\n'):
@@ -362,6 +387,11 @@ document.addEventListener("error", (event) => {
   if (!(el instanceof HTMLImageElement)) return;
   if (el.dataset.cardFallback) return;
   if (!/card-images\\//.test(el.getAttribute("src") || "")) return;
+  // 归重试逻辑管的卡图，要等它把两次重试用完再上占位图 —— 用完的标志就是它给父元素
+  // 加了 image-failed（imageRetries 只是「已经排了几次重试」，第二次出错时就已经是 2，
+  // 拿它当判据会早一轮换掉 src，重试请求就发不出去了）。
+  // 不在重试管辖范围内的（不是 .card-art img）当场兜底。
+  if (el.matches(".card-art img") && !el.parentElement.classList.contains("image-failed")) return;
   el.dataset.cardFallback = "1";
   el.src = CARD_PLACEHOLDER;
 }, true);

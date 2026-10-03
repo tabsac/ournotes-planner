@@ -109,11 +109,18 @@ function compare(actual, expected) {
       await page.screenshot({path:path.join(DEST,'browser-'+width+'.png'),fullPage:true});
     }
     await page.locator('[data-tab="inventory"]').click();
-    for(const [kind,count] of [['members',63],['snaps',64]]) {
+    // 张数跟着**快照**走，别再写死。主数据可以「一键更新数据.bat」刷新，
+    // 写死的数字迟早和快照对不上（这里原本写死 63/64，快照刷到 1.0.0.300 后
+    // members 已经变成 64 —— 而文件上面那段注释早就说了别写死）。
+    // members 的张数上面已经用 snapshotCounts() 校验过，这里两边都取应用自己的目录，
+    // 断言的重点是「目录里每张卡都渲染出来了、而且卡图真的解码成功」。
+    for(const [kind,count] of [['members',bootstrap.catalog.members.length],['snaps',bootstrap.catalog.snaps.length]]) {
       await page.locator('#addKind').selectOption(kind);
       await page.locator('#cardCatalog .card-art img').evaluateAll(images=>images.forEach(img=>img.loading='eager'));
       await page.waitForFunction(expected=>{
         const images=[...document.querySelectorAll('#cardCatalog .card-art img')];
+        // 快照里还没有卡图的新卡会退到内联 SVG 占位图，那也算「不是破图」——
+        // 所以判据是「解码出了尺寸」，data: 占位图同样满足。
         return images.length===expected && images.every(img=>img.complete && img.naturalWidth>0);
       },count);
     }

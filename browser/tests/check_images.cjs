@@ -30,8 +30,15 @@ const DEST = path.resolve(process.argv[2]);
     }, null, {timeout: 15000});
     assert.equal(attempts, 2);
     assert.equal(await image.evaluate(img => img.parentElement.classList.contains('image-failed')), false);
-    await page.locator('#cardCatalog img[src*="members-2.webp"]').evaluate(img => img.loading = 'eager');
-    await page.waitForFunction(() => document.querySelector('#cardCatalog img[src*="members-2.webp"]')?.parentElement.classList.contains('image-failed'), null, {timeout: 15000});
+    // 两次重试用完之后，应用会把卡图换成内联 SVG 占位图（卡图永久缺失时的兜底），
+    // 于是 src 不再是 members-2.webp —— 所以先把元素抓在手里，别再靠 src 找它。
+    // 这里顺带把「兜底真的渲染出来了、不是破图」也一并断言，比原来更严。
+    await page.locator('#cardCatalog img[src*="members-2.webp"]').evaluate(img => {img.loading = 'eager'; window.__failedCard = img;});
+    await page.waitForFunction(() => {
+      const img = window.__failedCard;
+      return !!img && img.parentElement.classList.contains('image-failed')
+        && img.dataset.cardFallback === '1' && img.complete && img.naturalWidth > 0;
+    }, null, {timeout: 15000});
     assert.equal(permanentFailures, 3);
     fs.writeFileSync(path.join(DEST, 'images-report.json'), JSON.stringify({passed: true, attempts, permanentFailures,
       reports: [{case: 'temporary 503 image failure recovers with a bounded static GET retry', passed: true},
