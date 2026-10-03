@@ -501,7 +501,7 @@ export async function exportB25(record, extras) {
     const _idW = record.accountId ? ctx.measureText(`ID ${record.accountId}`).width : 0;
     const userW = Math.max(_wName, _chipW + _idW, _wCounts, 130);
     const hsrX = left + userW + 8;   // 紧贴个人信息，只留几像素
-    const hsrY = PAD + 16;
+    const hsrY = PAD + 6;   // 原 PAD + 16，整体上移 10px
     ctx.fillStyle = "rgba(118,103,222,.14)";
     roundRect(ctx, hsrX, hsrY, hsrW, hsrH, 12);
     ctx.fill();
