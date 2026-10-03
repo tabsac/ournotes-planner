@@ -172,6 +172,7 @@ async function start() {
     const body = options.body ? JSON.parse(options.body) : {};
     if (path === '/api/bootstrap') return rpc('bootstrap');
     if (path === '/api/check-growth') return rpc('check-growth', body);
+    if (path === '/api/account-import') return rpc('import-account', body);
     if (path === '/api/optimize') return optimize(body);
     if (path === `/api/jobs/${job?.id}/cancel`) {
       if (sharedCancel) Atomics.store(new Int32Array(sharedCancel), 0, 1);
@@ -193,6 +194,10 @@ async function start() {
   });
   await restoreCache();
   await import('./generated-app.js');
+  const {mountAccountImport} = await import('./account-ui.js');
+  mountAccountImport(document.getElementById('accountImportRoot'));
+  const {mountB25} = await import('./b25-ui.js');
+  mountB25(document.getElementById('b25Root'));
 }
 
 start().catch(error => {

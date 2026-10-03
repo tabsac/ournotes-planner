@@ -112,6 +112,24 @@ def invoke(method, raw, job_id=None):
         return json.dumps(bootstrap(), ensure_ascii=False)
     if method == "check-growth":
         return json.dumps(p.growth_issues(body, data), ensure_ascii=False)
+    if method == "import-account":
+        # 账号包在浏览器里解密后，只把 _player 这一段送进来；主数据表在 Python 侧，
+        # 所以 exp->等级 的换算复用与官方公式同一份表。
+        import account_import
+        import account_scores
+        player = body.get("player")
+        if not isinstance(player, dict):
+            raise p.InputError("账号包内容无法识别，没有找到玩家数据。")
+        profile, report = account_import.build_profile(player, data)
+        # 成绩数据单独一路返回，不塞进 profile：profile 要过配队程序的 normalizeImport
+        # 校验，加字段风险大。前端把它挂在账号面板上画 B25。
+        try:
+            scores = account_scores.build_scores(player, data)
+        except Exception as exc:                     # 成绩坏了不能连累导入
+            scores = {"available": False, "entries": [], "songs": {}, "stats": {},
+                      "notes": ["成绩数据解析失败：%s" % exc]}
+        return json.dumps({"profile": profile, "report": report, "scores": scores},
+                          ensure_ascii=False)
     if method != "optimize":
         raise p.InputError("找不到此操作。")
     begin = time.monotonic()

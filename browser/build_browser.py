@@ -32,6 +32,54 @@ def add_runtime(archive, name, raw):
     archive.writestr(entry, raw)
 
 
+def patch_runtime_source(relative, raw):
+    """给上游只读的 Python 模块打补丁：让「乐队道具未解锁」成为合法状态。
+
+    上游把「未填写」和「未解锁」混为一谈：只接受 1..cap，且缺条目直接 raise
+    （"no zero is assumed"）。结果是任何还没解锁/没升级过乐队道具的账号
+    —— 新号基本都是 —— 永远过不了校验，也就永远算不出结果。
+
+    这里把 level 0 定义为「未解锁 = 不加成」，null/缺条目仍然是「未填写」。
+    游戏侧依据：MasterBandItemSkillEffect 里等级 1 的 _effectValue 是 10（=0.1%，
+    UNIT=10000），未解锁的道具游戏不给任何加成，所以 0 才是它的真实加成。
+    """
+    if not relative.endswith(".py"):
+        return raw
+    # 注意：上面这个判断不能写成 startswith("research/")。
+    # research/ 下面既有 .py 也有数据（research/<日期>/raw/*.json 等），
+    # 对数据做 decode→replace→encode 会改掉字节，
+    # 而配队程序会逐表校验 sha256（deck_power._snapshot）→ 启动直接失败。
+    # （Windows 上 write_text 默认写 CRLF，正好会被这一步"吃掉"，所以症状是校验不过。）
+    text = raw.decode("utf-8").replace("\r\n", "\n")
+    if relative == "planner_core.py":
+        # 养成校验：道具等级下界 1 -> 0
+        text = replace_once(text, '· 道具等级",\n              1, cap, "facility"',
+                                  '· 道具等级",\n              0, cap, "facility"')
+        # 实际计算前的入参校验：道具等级下界 1 -> 0
+        text = replace_once(text, '的等级", 1, max_level)', '的等级", 0, max_level)')
+    elif relative == "research/deck_power.py":
+        # 0 级没有 MasterBandItemLevel 行，跳过存在性校验
+        text = replace_once(
+            text,
+            '        level = _required(owned, "level", f"facility {identifier}", minimum=1)\n'
+            '        _unique(tables["MasterBandItemLevel"], f"facility {identifier} level",\n'
+            '                _bandItemId=identifier, _level=level)\n',
+            '        level = _required(owned, "level", f"facility {identifier}", minimum=0)\n'
+            '        if level:   # 0 = 未解锁，没有等级行可查\n'
+            '            _unique(tables["MasterBandItemLevel"], f"facility {identifier} level",\n'
+            '                    _bandItemId=identifier, _level=level)\n')
+        # 未解锁的道具不加成
+        text = replace_once(
+            text,
+            '        level = facilities[identifier]["level"]\n'
+            '        effects = [row for row in tables["MasterBandItemSkillEffect"]\n',
+            '        level = facilities[identifier]["level"]\n'
+            '        if level == 0:\n'
+            '            continue   # 未解锁：不加成\n'
+            '        effects = [row for row in tables["MasterBandItemSkillEffect"]\n')
+    return text.encode("utf-8")
+
+
 def main():
     upstream = json.loads((HERE / "upstream.json").read_text("utf-8"))
     core_version = upstream["version"]
@@ -50,6 +98,7 @@ def main():
     PUBLIC.mkdir()
     payload = io.BytesIO()
     included = []
+    overridden = []
     with zipfile.ZipFile(source) as archive, zipfile.ZipFile(payload, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as runtime:
         html = archive.read(prefix + "web/index.html").decode("utf-8")
         app = archive.read(prefix + "web/app.js").decode("utf-8").replace("\r\n", "\n")
@@ -62,6 +111,14 @@ def main():
                 raise ValueError("Private file in public release")
             if relative in ("planner_core.py", "search_cache.py", "solver_search.py", "score_bounds.py") or relative.startswith("research/"):
                 raw = archive.read(info)
+                # 数据快照覆盖层：活动加成/新卡这类只改数据的更新，不必动上游 zip
+                # （那个 zip 带 sha256 校验，是刻意设的保护，不该绕过）。
+                # 只要 snapshot-override/<zip 内相对路径> 存在，就用本地这份。
+                override = HERE / "snapshot-override" / relative
+                if override.is_file():
+                    raw = override.read_bytes()
+                    overridden.append(relative)
+                raw = patch_runtime_source(relative, raw)
                 add_runtime(runtime, relative, raw)
                 included.append(relative)
             elif relative.startswith("web/card-images/"):
@@ -72,10 +129,42 @@ def main():
                 target = PUBLIC / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(archive.read(info))
-        for name in ("browser_runtime.py", "cp_model.py"):
+        for name in ("browser_runtime.py", "cp_model.py", "account_import.py", "account_scores.py"):
             add_runtime(runtime, name, (HERE / name).read_bytes())
             included.append(name)
     (PUBLIC / "planner-runtime.zip").write_bytes(payload.getvalue())
+    # 角色立绘 / 道具图标（本地生成，随网页提供，无外链）
+    for image_dir, src_dir in (("character-images", "character"), ("item-images", "facility"),
+                               ("jacket-images", "jacket"), ("ui-images", "ui"), ("avatar-images", "avatar")):
+        images = sorted((HERE / "static-images" / src_dir).glob("*.webp"))
+        if not images:
+            raise ValueError(f"缺少图片资源 static-images/{src_dir}，请先跑 on_cards/make_web_assets.py")
+        destination = PUBLIC / image_dir
+        destination.mkdir(parents=True, exist_ok=True)
+        for image in images:
+            shutil.copyfile(image, destination / image.name)
+    # 取包工具下载（网页里的教程直接链到 downloads/）
+    # 注意：PUBLIC 每次构建都会被整个删除重建，所以这些文件必须走这一步，
+    # 手动往 dist/ 里丢是一次性的，下次构建就没了。
+    downloads = sorted((HERE / "downloads").glob("*")) if (HERE / "downloads").is_dir() else []
+    if not downloads:
+        raise ValueError("缺少 browser/downloads/，取包工具下载链接会 404")
+    download_dir = PUBLIC / "downloads"
+    download_dir.mkdir(parents=True, exist_ok=True)
+    for item in downloads:
+        if item.is_file():
+            shutil.copyfile(item, download_dir / item.name)
+    # B25 页要用的两张小表（评级档位 / 玩家等级）。
+    # 这几张表不在配队程序的 71 张快照里，所以单独放 static-data/ 随网页发布，
+    # 由 make_b25_extra.py 从 master 包生成；数据更新后要重跑那个脚本。
+    static_data = HERE / "static-data"
+    if not (static_data / "b25-extra.json").is_file():
+        raise ValueError("缺少 browser/static-data/b25-extra.json，请先运行 make_b25_extra.py")
+    static_dir = PUBLIC / "static-data"
+    static_dir.mkdir(parents=True, exist_ok=True)
+    for item in sorted(static_data.glob("*")):
+        if item.is_file():
+            shutil.copyfile(item, static_dir / item.name)
     pyodide = HERE / "node_modules/pyodide"
     destination = PUBLIC / "vendor/pyodide"
     destination.mkdir(parents=True, exist_ok=True)
@@ -119,9 +208,29 @@ def main():
     html = html.replace("卡图已保存在本地", "卡图随网页提供")
     html = html.replace('id="profileBadge" class="badge">截图示例', 'id="profileBadge" class="badge">个人卡库')
     html = replace_once(html, f'Our Notes 配队与收益 · v{core_version}', f'Our Notes 配队网页版 · v{VERSION} · 模型 v{core_version}')
+
+    # ---- 「账号包导入」页：一个 tab 按钮 + 一个容器 section（内容由 account-ui.js 渲染）----
+    # ---- 「B25 成绩」页：独立页签，内容由 b25-ui.js 渲染（数据由账号页存进 localStorage）----
+    html = replace_once(
+        html,
+        '<button data-tab="software">关于网页版</button>',
+        '<button data-tab="account">账号包导入</button><button data-tab="b25">B25 成绩</button>'
+        '<button data-tab="software">关于网页版</button>')
+    html = replace_once(
+        html,
+        ' <section id="software"',
+        ' <section id="account" class="tab-page" hidden><div id="accountImportRoot"></div></section>\n'
+        ' <section id="b25" class="tab-page" hidden><div id="b25Root"></div></section>\n'
+        ' <section id="software"')
+
     (HERE / "index.html").write_text(html, "utf-8")
-    (HERE / "style.css").write_bytes(css)
+    (HERE / "style.css").write_bytes(css + b"\n" + (HERE / "account.css").read_bytes())
     app = replace_once(app, 'const STORE = "ournotes-local-planner-v1-profile";', 'const STORE = "ournotes-browser-planner-v1-profile:" + window.Planner.scope;')
+    # 深链接白名单：上游只列了自己那几页，账号页和 B25 页要补上，否则 #b25 打不开
+    app = replace_once(
+        app,
+        'if (["plan","inventory","growth","evidence","software"].includes(tab)) showTab(tab);',
+        'if (["plan","inventory","growth","evidence","account","b25","software"].includes(tab)) showTab(tab);')
     profile_code = '''import {createProfileStorage} from './profile-storage.js';
 function profileWarning(id, text) {
   let panel = document.getElementById(id);
@@ -169,12 +278,112 @@ const profileStore = createProfileStorage(STORE, () => {
                  '  $("exitSoftware").disabled = on || updatingSoftware;\n',
                  '    await initSoftwareUpdate();\n', '    softwareBusy(updatingSoftware);\n'):
         app = replace_once(app, line, "")
+    # ---- 乐队道具：0 = 未解锁（见 patch_runtime_source 的说明）----
+    app = replace_once(app, 'min="1" max="${f.max_level}" data-facility="${f.id}"',
+                             'min="0" max="${f.max_level}" data-facility="${f.id}"')
+    app = replace_once(app, '乐队道具 · 所属乐队的全部道具共同提供加成',
+                             '乐队道具 · 所属乐队的全部道具共同提供加成（未解锁填 0）')
+
+    # ---- 「角色与道具」页加上立绘与道具图标 ----
+    # 只有文字标签时，用户没法确认哪个道具是哪件乐器、也没法一眼认出角色。
+    # 图来自游戏资源（见 on_cards/make_web_assets.py），随网页本地提供，不走外链。
+    app = replace_once(
+        app,
+        '<label>${esc(c.name)}<input type="number" min="1" max="1000" data-rank="${c.id}"',
+        '<label class="growth-item"><img class="growth-art" src="./character-images/character-${c.id}.webp"'
+        ' alt="" loading="lazy" decoding="async" width="40" height="40">${esc(c.name)}'
+        '<input type="number" min="1" max="1000" data-rank="${c.id}"')
+    app = replace_once(
+        app,
+        '<label>${esc(f.name)}<input type="number" min="0" max="${f.max_level}" data-facility="${f.id}"',
+        '<label class="growth-item"><img class="growth-art growth-art-item" src="./item-images/facility-${f.id}.webp"'
+        ' alt="" loading="lazy" decoding="async" width="40" height="40">${esc(f.name)}'
+        '<input type="number" min="0" max="${f.max_level}" data-facility="${f.id}"')
+
+    # ---- 「收益规划」结果里的队伍：给 5 位成员与 5 张 Snap 配上卡图 ----
+    # 原来 deckHtml 只有一行行文字（[标题] 名字 / Lv... / Snap ...），
+    # 5 套队伍全靠读名字辨认，很容易看错。cardArt() 已经存在（「我的卡库」在用），
+    # 这里直接复用，只是外面套一层限定宽度的 .deck-art 容器，
+    # 因为 .card-art 本身是 width:100% + aspect-ratio:3/4，直接放进队伍行会撑爆。
+    app = replace_once(
+        app,
+        'return `<div class="deck-slot"><b>[${esc(m.title)}] ${esc(m.name)}</b>',
+        'return `<div class="deck-slot"><span class="deck-art deck-art-member">${cardArt(m,"members")}</span>'
+        '<div class="deck-body"><b>[${esc(m.title)}] ${esc(m.name)}</b>')
+    app = replace_once(
+        app,
+        '<br><span class="muted">Snap [${esc(s.title)}] ${esc(s.name)} · Lv.${support.level} / 突破 ${support.limit_break_count} 次</span></div>`;',
+        '<br><span class="deck-snap"><span class="deck-art deck-art-snap">${cardArt(s,"snaps")}</span>'
+        '<span class="muted">Snap [${esc(s.title)}] ${esc(s.name)} · Lv.${support.level} / 突破 ${support.limit_break_count} 次</span>'
+        '</span></div></div>`;')
+
+    # ---- 「前三首最佳收益乐曲」：给每首歌配封面 ----
+    # 封面文件名 jkt_<乐队>_<乐曲ID>.jpg，乐曲 ID 直接从文件名取，
+    # MasterLiveMusic 全 84 首都有封面，不会缺图。
+    app = replace_once(
+        app,
+        '<article class="song-rank"><div class="position">0${i+1}${tied ? " · 平手" : ""}</div>'
+        '<strong>${esc(song(row.song_id).title)}</strong>',
+        '<article class="song-rank"><div class="song-head">'
+        '<img class="song-cover" src="./jacket-images/song-${row.song_id}.webp" alt="" loading="lazy" decoding="async" width="56" height="56">'
+        '<div><div class="position">0${i+1}${tied ? " · 平手" : ""}</div>'
+        '<strong>${esc(song(row.song_id).title)}</strong></div></div>')
+
+    # ---- 账号包导入桥接：把生成的 App 内部函数暴露给 account-ui.js ----
+    # 追加在模块末尾，这样 replaceState / normalizeImport / state / catalog / notice 都在作用域里。
+    app += '''
+
+/* ===== 账号包导入桥接（build_browser.py 注入）===== */
+// 乐曲封面缺失时退回占位图。用内联 onerror 会被这里的 CSP
+// (script-src 'self' 'unsafe-eval'，没有 'unsafe-inline') 拦掉，所以在捕获阶段挂监听。
+// 封面是按配队程序快照的乐曲表预生成的，正常情况下不会走到这里；
+// 万一以后快照新增了乐曲，也只是显示占位图而不是破图。
+document.addEventListener("error", (event) => {
+  const el = event.target;
+  if (!(el instanceof HTMLImageElement)) return;
+  if (!el.classList.contains("song-cover")) return;
+  if (el.dataset.coverFallback) return;
+  el.dataset.coverFallback = "1";
+  el.src = "./jacket-images/placeholder.webp";
+}, true);
+
+// 卡图缺失的兜底。卡图 (card-images/members-*.webp / snaps-*.webp) 来自配队程序的
+// 固定快照，而主数据是可以一键更新的 —— 所以「数据里有这张卡、但图还没跟上」是
+// 正常会发生的（实测刷到 1.0.0.300 时 members-64 / snaps-70 就是这样）。
+// 这里用一个内联 SVG 占位（CSP 的 img-src 允许 data:），别让它变成破图。
+const CARD_PLACEHOLDER = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="160" viewBox="0 0 120 160">'
+  + '<rect width="120" height="160" rx="10" fill="#e8e7f4"/>'
+  + '<text x="60" y="86" font-size="34" text-anchor="middle" fill="#9d9bb8">?</text>'
+  + '<text x="60" y="112" font-size="12" text-anchor="middle" fill="#9d9bb8">暂无卡图</text>'
+  + '</svg>');
+document.addEventListener("error", (event) => {
+  const el = event.target;
+  if (!(el instanceof HTMLImageElement)) return;
+  if (el.dataset.cardFallback) return;
+  if (!/card-images\\//.test(el.getAttribute("src") || "")) return;
+  el.dataset.cardFallback = "1";
+  el.src = CARD_PLACEHOLDER;
+}, true);
+
+window.PlannerAccount = {
+  // 走 App 自己的 normalizeImport + replaceState，保证与「导入卡库」走同一条校验路径
+  apply(wrapper, message) {
+    replaceState(normalizeImport(wrapper));
+    if (message) notice(message, "success");
+  },
+  current() { return state; },
+  catalog() { return catalog; },
+  notify(text, type) { notice(text, type); },
+};
+'''
     (HERE / "generated-app.js").write_text(app, "utf-8")
     report = {"browser_version": VERSION, "core_version": core_version,
               "public_source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
               "runtime_sha256": hashlib.sha256(payload.getvalue()).hexdigest(),
               "python_runtime": "Pyodide 314.0.7", "solver": "or-tools-wasm 0.9.1",
               "payload_files": included, "private_files_included": False,
+              "snapshot_overrides": sorted(overridden),
               "static_files": {p.relative_to(PUBLIC).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
                                for p in sorted(PUBLIC.rglob("*")) if p.is_file() and p.name != "build-info.json"}}
     (PUBLIC / "build-info.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), "utf-8")

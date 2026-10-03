@@ -1,0 +1,563 @@
+/* 「账号包导入」页 —— 由 build_browser.py 追加到生成的 style.css 末尾。
+   沿用页面原有配色（紫 #7667de）与 .panel / .notice / .button 等既有类。 */
+
+.account-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 16px 0;
+}
+
+.account-drop {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+    justify-content: center;
+    padding: 28px 18px;
+    margin: 14px 0 18px;
+    border: 2px dashed #c9c4e8;
+    border-radius: 14px;
+    background: #faf9ff;
+    color: #55516e;
+    text-align: center;
+    transition: border-color .15s, background .15s;
+}
+
+.account-drop strong {
+    color: #2f2b45;
+    font-size: 1.02rem;
+}
+
+.account-drop span {
+    font-size: .86rem;
+    color: #7b769a;
+}
+
+.account-drop.over {
+    border-color: #7667de;
+    background: #f1eeff;
+}
+
+.account-help {
+    margin: 18px 0 6px;
+    border: 1px solid #e6e3f5;
+    border-radius: 12px;
+    padding: 12px 16px;
+    background: #fcfbff;
+}
+
+.account-help summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: #4b4670;
+}
+
+.account-help h4 {
+    margin: 16px 0 6px;
+    font-size: .95rem;
+    color: #4b4670;
+}
+
+.account-help pre {
+    margin: 6px 0;
+    padding: 10px 12px;
+    background: #f4f2fb;
+    border-radius: 8px;
+    font-size: .82rem;
+    overflow-x: auto;
+}
+
+.account-help ol {
+    margin: 6px 0 6px 20px;
+    padding: 0;
+}
+
+.account-help li {
+    margin: 4px 0;
+}
+
+.account-report {
+    margin-top: 18px;
+}
+
+.account-source {
+    font-size: .86rem;
+    color: #6b6688;
+    word-break: break-all;
+}
+
+.account-summary {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+}
+
+.account-summary th,
+.account-summary td {
+    padding: 7px 10px;
+    border-bottom: 1px solid #eceaf6;
+    text-align: left;
+    font-size: .92rem;
+}
+
+.account-summary th {
+    width: 46%;
+    color: #55516e;
+    font-weight: 600;
+}
+
+.account-report code {
+    background: #f4f2fb;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: .85em;
+    word-break: break-all;
+}
+
+.account-report .notice ul {
+    margin: 6px 0 0 18px;
+    padding: 0;
+}
+
+#accountAdb.primary {
+    background: #7667de;
+    border-color: #7667de;
+    color: #fff;
+}
+
+.account-paste {
+    margin: 18px 0;
+    padding: 16px;
+    border: 1px solid #e6e3f5;
+    border-radius: 14px;
+    background: #fcfbff;
+}
+
+.account-paste label {
+    display: block;
+    margin-bottom: 8px;
+    color: #2f2b45;
+}
+
+.account-paste label .muted {
+    display: block;
+    margin-top: 3px;
+    font-size: .85rem;
+    color: #7b769a;
+    font-weight: 400;
+}
+
+.account-paste textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    border: 1px solid #d9d5ee;
+    border-radius: 10px;
+    font: 12px/1.5 ui-monospace, Consolas, monospace;
+    color: #2f2b45;
+    background: #fff;
+    resize: vertical;
+}
+
+.account-paste textarea:focus {
+    outline: 2px solid #b9b0ee;
+    border-color: #7667de;
+}
+
+.account-paste button {
+    margin-top: 10px;
+}
+
+.account-paste button.primary {
+    background: #7667de;
+    border-color: #7667de;
+    color: #fff;
+}
+
+
+/* ===== 「角色与道具」页：角色立绘与乐队道具图标（build_browser.py 注入）=====
+   只有文字标签时无法确认哪个道具是哪件乐器，加上图后一眼可辨。
+   图片全部本地生成并随网页提供，不引用任何外链。
+
+   上游的 .growth-row 是 5 列网格、每个 label 是一个单元（文字在上、输入框在下）。
+   所以这里把 label 自己变成两列网格：左列图（跨两行）、右列上=名称 下=输入框。
+   用 inline-flex 会把图和文字挤在同一行，导致「燈のマイ/ク」这种难看的换行。 */
+.growth-item {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  column-gap: 9px;
+  align-items: center;
+}
+.growth-item > .growth-art {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: #eef0f6;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .07);
+}
+.growth-item > .growth-art-item {
+  background: #e7ebf4;
+}
+.growth-item > input {
+  grid-column: 2;
+  grid-row: 2;
+  margin-top: 4px;
+}
+/* 图没加载出来时不显示破图占位 */
+.growth-art[src=""],
+.growth-art:not([src]) { visibility: hidden; }
+/* ===== 「收益规划」结果里的队伍：成员卡与 Snap 缩略图 =====
+   cardArt() 输出的 .card-art 是 width:100% + aspect-ratio:3/4（为「我的卡库」整列宽设计），
+   直接放进 .deck-slot 会撑满整行，所以外面套一层固定宽度的 .deck-art 做约束。 */
+.deck-slot {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: start;
+}
+.deck-slot > .deck-art {
+  grid-column: 1;
+}
+.deck-slot > .deck-body {
+  grid-column: 2;
+  min-width: 0;
+}
+.deck-art > .card-art {
+  width: 100%;
+  border-radius: 6px;
+}
+.deck-art > .card-art .art-fallback {
+  font-size: 9px;
+  line-height: 1.5;
+}
+.deck-snap {
+  display: inline-grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  column-gap: 7px;
+  align-items: center;
+}
+.deck-snap > .deck-art-snap {
+  grid-column: 1;
+}
+.deck-snap > .deck-art-snap > .card-art {
+  border-radius: 4px;
+}
+/* ===== 「前三首最佳收益乐曲」的封面 =====
+   原卡片只有编号和曲名，三张卡并排时很难一眼分辨是哪首歌。 */
+.song-head {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: center;
+}
+.song-head > .song-cover {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #e9ebf4;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .06);
+}
+.song-head .position {
+  color: #8b8eae;
+  font-size: 11px;
+}
+/* ===== 账号包导入页：下载链接做成按钮样式 =====
+   取包工具是 <a download>，默认是蓝色下划线文字，混在一排 <button> 里很突兀。 */
+a.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #f3f3fa;
+  color: var(--blue);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  text-align: center;
+}
+a.button-link.primary {
+  background: #7667de;
+  border-color: #7667de;
+  color: #fff;
+}
+a.button-link:hover {
+  filter: brightness(.97);
+}
+/* ===== B25 成绩卡 =====
+   版式参考用户给的样板：3 列卡片，每张 = 序号 + 封面 + 曲名 + 难度/分数 + 「原值 → FC 值」+ FC/AP 徽章。
+   颜色刻意用深色，这样导出的 PNG 跟网页上看到的一致。 */
+.account-b25-slot:empty { display: none; }
+.b25-panel {
+  margin: 16px 0 18px;
+  padding: 18px 20px 16px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #17161f 0%, #201d31 100%);
+  color: #e7e6f2;
+}
+.b25-panel h3 { margin: 0 0 4px; font-size: 17px; color: #fff; }
+.b25-head { display: flex; align-items: center; justify-content: flex-start; gap: 16px; flex-wrap: wrap; }
+.b25-sub { margin: 0; font-size: 12.5px; color: #a5a3bf; }
+.b25-sub code { color: #cfcee0; }
+.b25-rating { text-align: right; line-height: 1.15; flex: none; }
+.b25-rating span { display: block; font-size: 12px; color: #a5a3bf; }
+.b25-rating strong { display: block; font-size: 34px; color: #ffd66b; }
+.b25-rating .b25-rating-hint { font-size: 11px; color: #8f8da8; }
+.b25-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0 10px;
+}
+
+.b25-card {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .06);
+}
+.b25-rank {
+  position: absolute; top: 4px; left: 10px;
+  font-size: 11px; font-weight: 700; color: rgba(255, 255, 255, .5);
+}
+.b25-jacket { width: 64px; height: 64px; border-radius: 9px; flex: none; object-fit: cover; margin-top: 8px; }
+.b25-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; padding-top: 8px; }
+.b25-title {
+  font-size: 13.5px; font-weight: 700; color: #fff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.b25-meta { font-size: 11.5px; color: #9d9bb8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.b25-values { font-size: 15px; display: flex; align-items: baseline; gap: 5px; }
+.b25-values b { color: #e7e6f2; }
+.b25-nums span { color: #8f8da8; font-size: 12px; }
+.b25-values i { color: #cfcee0; font-style: normal; }
+.b25-values em { font-style: normal; font-size: 11px; color: #8f8da8; }
+.b25-badge {
+  position: absolute; right: 10px; bottom: 10px;
+  padding: 2px 8px; border-radius: 9px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .3px;
+}
+.b25-badge-ap { background: rgba(126, 224, 168, .18); color: #7ee0a8; }
+.b25-badge-fc { background: rgba(127, 198, 255, .18); color: #7fc6ff; }
+.b25-note { margin: 6px 0 0; font-size: 12px; color: #9d9bb8; }
+.b25-note code { color: #cfcee0; }
+.b25-panel .notice { background: rgba(255, 216, 107, .10); color: #e8dfbe; }
+.b25-actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.b25-actions button.primary { background: #7667de; border-color: #7667de; color: #fff; }
+.b25-dl-state { font-size: 12.5px; color: #a5a3bf; }
+/* ===== B25 成绩页（独立页签）===== */
+#b25Root { display: block; }
+#b25Root .b25-panel { margin: 0; }
+#b25Root h2 { margin: 0 0 6px; font-size: 20px; color: #fff; }
+.b25-dim { margin: 2px 0 0; font-size: 12px; color: #8f8da8; }
+.b25-empty { margin: 0; }
+.b25-empty ol { margin: 6px 0 10px; padding-left: 22px; font-size: 13.5px; line-height: 1.9; }
+.b25-empty a { color: var(--blue); }
+/* 账号页里的摘要条 */
+.b25-teaser {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  margin: 14px 0 4px; padding: 12px 14px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #17161f 0%, #201d31 100%);
+  color: #e7e6f2;
+}
+.b25-teaser b { color: #fff; }
+.b25-teaser-line { display: block; margin-top: 3px; font-size: 12.5px; color: #a5a3bf; }
+.b25-teaser-line b { color: #ffd66b; }
+.b25-teaser a.button-link { flex: none; border: 0; }
+/* ===== B25：用户信息区 + 纵向长卡片 + 彩色难度徽章 ===== */
+.b25-head { flex-wrap: wrap; }
+.b25-user { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.b25-avatar {
+  width: 64px; height: 64px; border-radius: 12px; flex: none;
+  object-fit: cover; object-position: center 18%;
+  background: rgba(255,255,255,.08); border: 2px solid rgba(255,255,255,.14);
+}
+.b25-avatar-empty { display: block; }
+.b25-user-text { min-width: 0; }
+.b25-user-name { font-size: 18px; font-weight: 700; color: #fff; line-height: 1.3; }
+.b25-user-sub { font-size: 12.5px; color: #a5a3bf; margin-top: 3px; }
+.b25-user-sub code { color: #cfcee0; }
+.b25-rank-chip {
+  display: inline-block; margin-right: 8px; padding: 1px 8px; border-radius: 8px;
+  background: rgba(118,103,222,.28); color: #bdb2ff; font-weight: 700;
+}
+/* 全服总评级 + 牌子 */
+.b25-hsr {
+  display: flex; align-items: center; gap: 12px;
+  margin: 14px 0 2px; padding: 10px 16px; border-radius: 12px;
+  background: linear-gradient(90deg, rgba(118,103,222,.30) 0%, rgba(118,103,222,.10) 100%);
+}
+.b25-medal { flex: none; }
+.b25-hsr-text { display: flex; flex-direction: column; line-height: 1.25; }
+.b25-hsr-label { font-size: 11px; letter-spacing: .10em; color: #c8c4e6; }
+.b25-hsr-value { font-size: 30px; color: #fff; }
+.b25-hsr-medal { font-size: 12px; color: #a5a3bf; }
+
+/* 卡片：竖版，封面在上，文字在下 */
+.b25-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .b25-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 860px)  { .b25-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 620px)  { .b25-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.b25-card {
+  flex-direction: column; align-items: stretch; gap: 6px;
+  padding: 10px 10px 12px;
+}
+.b25-card-top { display: flex; align-items: center; gap: 6px; }
+.b25-card .b25-rank { position: static; font-size: 12px; color: rgba(255,255,255,.55); margin-right: 2px; }
+.b25-card .b25-jacket {
+  width: 100%; height: auto; aspect-ratio: 1 / 1; margin: 0;
+  border-radius: 10px; object-fit: cover;
+}
+.b25-card .b25-title { font-size: 13.5px; }
+.b25-card .b25-values { font-size: 17px; margin-top: 1px; }
+.b25-card .b25-meta { font-size: 11px; color: #8f8da8; }
+.b25-counted { color: #ffd66b; font-size: 12px; font-weight: 700; margin-left: 6px; }
+
+/* 徽章：FC 不变，AP 改粉红；难度用同一套构造（圆角矩形底 + 彩色字） */
+.b25-badge { position: static; padding: 2px 7px; border-radius: 8px; letter-spacing: .3px; }
+.b25-card-top .b25-badge { margin-left: auto; }
+.b25-card-top .b25-badge + .b25-badge { margin-left: 4px; }
+.b25-badge-ap { background: rgba(255,138,190,.20); color: #ff8abe; }
+.b25-badge-diff { font-size: 10.5px; font-weight: 700; }
+.b25-diff-expert { background: rgba(255,107,107,.20); color: #ff6b6b; }
+.b25-diff-hard   { background: rgba(255,214,107,.20); color: #ffd66b; }
+.b25-diff-normal { background: rgba(126,224,168,.20); color: #7ee0a8; }
+.b25-diff-easy   { background: rgba(127,198,255,.20); color: #7fc6ff; }
+/* 牌子上的星星：用游戏导出的真图标；未点亮用滤镜压暗（内联 style 会被 CSP 拦掉） */
+.b25-star-off { filter: grayscale(1) brightness(.42); }
+/* ===== B25 卡片：难度靠右；FC/AP 放大 1.5 倍放到曲名行右侧 ===== */
+.b25-card-top { align-items: center; }
+/* 难度徽章推到最右 */
+.b25-card-top .b25-badge-diff { margin-left: auto; }
+/* 曲名行：曲名占满左侧，徽章贴在右侧，上端与曲名齐平 */
+.b25-title-row { display: flex; align-items: flex-start; gap: 6px; }
+.b25-title-row .b25-title { flex: 1 1 auto; min-width: 0; }
+.b25-title-row .b25-badge {
+  flex: none; margin: 0;              /* 抵消 .b25-card-top 里的 margin-left:auto */
+  font-size: 15.75px;                 /* 10.5 × 1.5 */
+  padding: 3px 10.5px;                /* 2/7 × 1.5 */
+  border-radius: 12px;                /* 8 × 1.5 */
+  line-height: 1.15;
+}
+/* ===== B25 头部新版式 =====
+   用户信息放大在左；硬币 + HIGH SCORE RATING 缩小放到右边同一行；
+   删掉了「铜牌 ★N 距下一档还差 X」那行文字。 */
+.b25-head { flex-wrap: wrap; align-items: center; gap: 18px 20px; }
+.b25-user { flex: 1 1 auto; gap: 16px; }
+.b25-avatar { width: 88px; height: 88px; border-radius: 16px; border-width: 3px; }
+.b25-user-name { font-size: 22px; }
+.b25-user-sub { font-size: 14px; margin-top: 5px; }
+.b25-rank-chip { font-size: 13px; padding: 3px 12px; border-radius: 10px; }
+/* 硬币 + 最高分：缩小、靠右 */
+.b25-hsr {
+  display: flex; align-items: center; gap: 10px;
+  flex: none; margin: 0; padding: 8px 14px; border-radius: 12px;
+  background: rgba(118,103,222,.14);
+}
+.b25-hsr .b25-medal { width: 62px; height: 48px; }
+.b25-hsr-label { font-size: 10px; letter-spacing: .08em; }
+.b25-hsr-value { font-size: 22px; }
+/* 硬币按段位染色（用的是游戏原金币图） */
+.b25-coin-silver { filter: grayscale(1) brightness(1.12); }
+.b25-coin-bronze { filter: sepia(1) saturate(2.4) hue-rotate(-18deg) brightness(.82); }
+/* 硬币/牌子 + 最高分要紧挨着个人信息，不要被推开；
+   用 margin-right:auto 把 Rating 顶到最右，中间不留大空档。 */
+.b25-head .b25-user { flex: 0 1 auto; }
+.b25-head .b25-hsr { margin-right: auto; }
+/* ===== B25 头部：牌子要紧贴个人信息右侧（上一版推到中间偏右了）=====
+   只让 Rating 被推到最右，牌子跟着用户块走。 */
+.b25-head { row-gap: 10px; padding-bottom: 8px; align-items: center; }
+.b25-head .b25-user { flex: 0 1 auto; min-width: 0; }
+.b25-head .b25-hsr { margin-right: 0; margin-left: 0; flex: none; }
+.b25-head .b25-rating { margin-left: auto; flex: none; }
+/* Rating 下面的小字不要顶到卡片 */
+.b25-rating-hint { display: block; margin-bottom: 2px; }
+.b25-grid { margin-top: 14px; }
+/* ===== B25 卡片（网页版）：FC/AP 徽章固定和定数同一行且缩小，与导出图一致 ===== */
+.b25-base-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.b25-base { font-size: 12px; color: #9d9bb8; flex: none; }
+.b25-base-row .b25-badge {
+  flex: none; margin: 0; position: static;
+  font-size: 12px; padding: 2px 8.4px; border-radius: 9px; line-height: 1.15;
+}
+.b25-title { font-size: 15px; }
+/* ===== B25 卡片/头部 收尾修正 ===== */
+/* 数值行：左边 27 → 27，右边 FC/AP 徽章 */
+.b25-values { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.b25-nums { display: inline-flex; align-items: baseline; gap: 5px; }
+/* 头像之前 object-position: center 18% 把脸切歪了，上移到额头附近 */
+.b25-avatar { object-position: center 8%; width: 96px; height: 96px; }
+.b25-user-name { font-size: 24px; }
+/* 个人信息和分数靠拢：不再把 Rating 顶到最右 */
+.b25-head { gap: 14px 16px; padding-bottom: 2px; }
+.b25-head .b25-rating { margin-left: 22px; }
+.b25-grid { margin-top: 10px; }
+/* ===== B25 收尾：头像方形图 + 头部放大贴紧 + 牌子框容纳星星 + 分数靠拢 ===== */
+.b25-avatar { width: 112px; height: 112px; object-fit: cover; object-position: center; border-radius: 18px; }
+.b25-user-name { font-size: 27px; }
+.b25-user-sub { font-size: 15px; }
+.b25-head { gap: 14px 18px; padding-bottom: 0; margin-bottom: 0; }
+/* 分数块再向左靠（只留很小间距） */
+.b25-head .b25-rating { margin-left: 10px; }
+/* 头部和第一行卡片挨着 */
+.b25-grid { margin-top: 6px; }
+/* 牌子：背景框向下拉高，把放大后的硬币和星星都装进去 */
+.b25-hsr { padding: 10px 16px 14px; gap: 12px; align-items: flex-start; }
+.b25-hsr .b25-medal { width: 78px; height: 66px; flex: none; }
+.b25-hsr-label { font-size: 11px; }
+.b25-hsr-value { font-size: 30px; }
+/* ===== B25 头部最终定稿 =====
+   前面几轮往这个文件追加了 5~6 份 .b25-head / .b25-avatar / .b25-rating 规则，
+   后面的会覆盖前面的，导致「改了没生效」。这里统一用 #b25Root 前缀（ID 优先级
+   高于 class）一次压掉，不再靠追加顺序。 */
+#b25Root .b25-head {
+  display: flex; align-items: center; justify-content: flex-start;
+  gap: 12px 16px; flex-wrap: wrap; padding-bottom: 0; margin-bottom: 0;
+}
+#b25Root .b25-user { display: flex; align-items: center; gap: 16px; flex: 0 1 auto; min-width: 0; }
+#b25Root .b25-avatar {
+  width: 120px; height: 120px; border-radius: 22px;
+  object-fit: cover; object-position: center; border-width: 3px;
+}
+#b25Root .b25-user-name { font-size: 30px; }
+#b25Root .b25-user-sub { font-size: 16px; margin-top: 7px; }
+#b25Root .b25-rank-chip { font-size: 15px; padding: 4px 14px; border-radius: 11px; }
+/* 牌子框：向下拉开，装得下放大后的硬币和星星 */
+#b25Root .b25-hsr {
+  flex: none; margin: 0 0 0 18px; padding: 12px 18px 18px;
+  gap: 14px; align-items: flex-start;
+}
+#b25Root .b25-medal { width: 84px; height: 72px; }
+#b25Root .b25-hsr-value { font-size: 32px; }
+/* 分数块向左靠，紧贴个人信息 */
+#b25Root .b25-rating { flex: none; margin-left: 14px; }
+#b25Root .b25-grid { margin-top: 6px; }
+#b25Root .b25-hsr { margin-left: 0; }
+#b25Root .b25-rating { margin-left: 12px; }
+#b25Root .b25-head { column-gap: 14px; }
+/* ===== 按用户要求：**网页端回滚**到之前的状态 =====
+   下面这些调整只保留在导出的图片里，网页回到改版之前。 */
+#b25Root .b25-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 8px; }
+#b25Root .b25-user { gap: 12px; }
+#b25Root .b25-avatar { width: 64px; height: 64px; border-radius: 12px; object-fit: cover; object-position: center 18%; border-width: 2px; }
+#b25Root .b25-user-name { font-size: 18px; }
+#b25Root .b25-user-sub { font-size: 12.5px; margin-top: 3px; }
+#b25Root .b25-rank-chip { font-size: 12px; padding: 1px 8px; border-radius: 8px; }
+#b25Root .b25-hsr { margin: 0; padding: 8px 14px; gap: 10px; align-items: center; }
+#b25Root .b25-medal { width: 62px; height: 48px; }
+#b25Root .b25-hsr-value { font-size: 22px; }
+#b25Root .b25-rating { margin-left: auto; }
+#b25Root .b25-grid { margin-top: 14px; }
+#b25Root .b25-title-row { display: flex; align-items: flex-start; gap: 6px; }
+#b25Root .b25-title-row .b25-title { flex: 1 1 auto; min-width: 0; }
+#b25Root .b25-title-row .b25-badge { flex: none; font-size: 15.75px; padding: 3px 10.5px; border-radius: 12px; }
+#b25Root .b25-values { display: block; }
