@@ -145,6 +145,13 @@ const readPage = (page) => page.evaluate(() => {
         await page.locator('#accountB25 [data-goto="b25"]').click();
         await page.waitForSelector("#b25Root .b25-panel", {timeout: 15000});
         await page.waitForTimeout(1200);
+        // 封面是异步解码的。本机（127.0.0.1）几十毫秒就好了，线上要几百毫秒到几秒，
+        // 不等它就直接断言「封面全部加载」会在真实网络下误报（实测线上只数到 14/25，
+        // 但导出图里 25 张封面全在 —— 纯粹是断言抢跑）。这里等图片真的解码完再读。
+        await page.waitForFunction(() => {
+            const imgs = [...document.querySelectorAll("#b25Root .b25-jacket")];
+            return imgs.length >= 25 && imgs.every(i => i.complete && i.naturalWidth > 0);
+        }, null, {timeout: 60000}).catch(() => { /* 超时也让下面的 check 报出真实数字 */ });
         const info = await readPage(page);
         console.log("   " + JSON.stringify({...info, first: info.first}, null, 1).replace(/\n/g, "\n   "));
 
