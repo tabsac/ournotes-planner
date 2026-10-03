@@ -349,9 +349,9 @@ function drawMedal(ctx, medal, x, y) {
     // 牌子直接用游戏原图（grade-bronze / silver / gold），不用再染色
     const brand = gradeImages && gradeImages[medal.key];
     if (brand) {
-        // 牌子宽度 = 星条上「第2颗星左沿 → 第5颗星右沿」= 56px
+        // 牌子宽度 = 星条上「第2颗星左沿 → 第5颗星右沿」= 56px，再左移 2px 微调
         // 星条起点 x+2，间距 14：星2左沿 = x+16，星5右沿 = x+72
-        ctx.drawImage(brand, x + 16, y, 56, 56);
+        ctx.drawImage(brand, x + 14, y, 56, 56);
     } else {
         ctx.fillStyle = "#c98a52";
         ctx.fillRect(x, y, 30, 30);
@@ -500,7 +500,7 @@ export async function exportB25(record, extras) {
     ctx.fillStyle = "#c8c4e6";
     ctx.font = "11px system-ui, sans-serif";
     ctx.textAlign = "right";
-    ctx.fillText("HIGH SCORE RATING", hsrX + hsrW - 16, hsrY + 28);
+    ctx.fillText("HIGH SCORE RATING", hsrX + hsrW - 16, hsrY + 22.5);
     ctx.fillStyle = "#ffffff";
     ctx.font = "bold 25px system-ui, sans-serif";
     ctx.fillText(int(total), hsrX + hsrW - 16, hsrY + 46);
