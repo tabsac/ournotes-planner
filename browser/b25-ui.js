@@ -442,7 +442,7 @@ export async function exportB25(record, extras) {
     ctx.textBaseline = "top";
     ctx.fillStyle = "#ffffff";
     ctx.font = "bold 29px system-ui, 'Microsoft YaHei', sans-serif";
-    ctx.fillText(record.playerName || info.name || "（未命名）", left, PAD + 16);
+    ctx.fillText(record.playerName || info.name || "（未命名）", left, PAD + 14);
 
     const rank = rankFor(info.exp ?? 0, extras);
     const subY = PAD + 56;    // 62 x 0.9
@@ -476,7 +476,7 @@ export async function exportB25(record, extras) {
     ctx.fillText("Rating", HRIGHT, PAD + 4);
     ctx.fillStyle = "#ffd66b";
     ctx.font = "bold 56px system-ui, 'Microsoft YaHei', sans-serif";
-    ctx.fillText(num(stats.rating_avg), HRIGHT, PAD + 34);
+    ctx.fillText(num(stats.rating_avg), HRIGHT, PAD + 32);
     ctx.fillStyle = "#8f8da8";
     ctx.font = "14px system-ui, 'Microsoft YaHei', sans-serif";
     ctx.fillText(ratingText, HRIGHT, PAD + 92);
