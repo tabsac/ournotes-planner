@@ -349,21 +349,23 @@ function drawMedal(ctx, medal, x, y) {
     // 牌子直接用游戏原图（grade-bronze / silver / gold），不用再染色
     const brand = gradeImages && gradeImages[medal.key];
     if (brand) {
-        ctx.drawImage(brand, x, y, 44, 44);
+        // 牌子宽度 = 星条上「第2颗星左沿 → 第5颗星右沿」= 56px
+        // 星条起点 x+2，间距 14：星2左沿 = x+16，星5右沿 = x+72
+        ctx.drawImage(brand, x + 16, y, 56, 56);
     } else {
         ctx.fillStyle = "#c98a52";
         ctx.fillRect(x, y, 30, 30);
     }
     // 星级：6 个星位，亮起 medal.step 个（同样用游戏原图）
     for (let i = 0; i < 6; i++) {
-        const sx = x + 2 + i * 12, sy = y + 48;
+        const sx = x + 2 + i * 14, sy = y + 60;
         if (!starImage) continue;
         if (i < medal.step) {
-            ctx.drawImage(starImage, sx, sy, 12, 12);
+            ctx.drawImage(starImage, sx, sy, 14, 14);
         } else {
             ctx.save();
             ctx.globalAlpha = 0.32;
-            ctx.drawImage(starImage, sx, sy, 12, 12);
+            ctx.drawImage(starImage, sx, sy, 14, 14);
             ctx.restore();
         }
     }
@@ -375,7 +377,7 @@ export async function exportB25(record, extras) {
     const PAD = 44, GAP = 18;
     // 卡高必须容得下：徽章行(38) + 封面(184) + 曲名(30) + 数值(28) + 脚注(20) + 下边距
     const CARD_W = 268, CARD_H = 348;
-    const HEAD = 210, FOOT = 96;
+    const HEAD = 160, FOOT = 96;   // 176 x 0.9
     const rows = Math.ceil(entries.length / COLUMNS);
     const width = PAD * 2 + CARD_W * COLUMNS + GAP * (COLUMNS - 1);
     const height = HEAD + rows * CARD_H + (rows - 1) * GAP + FOOT;
@@ -406,14 +408,19 @@ export async function exportB25(record, extras) {
     }
 
     // ---- 头部：用户信息（左，放大）+ 牌子与最高分（紧挨着）+ Rating（最右），同一行 ----
-    const avatarSize = 88;
+    const avatarSize = 104;   // 116 x 0.9
     const avatarId2 = info.avatar_card_id || info.favorite_card_id;
     const avatar = avatarId2 ? await loadImage(`./avatar-images/avatar-${avatarId2}.webp`) : null;
     if (avatar) {
         ctx.save();
         roundRect(ctx, PAD, PAD, avatarSize, avatarSize, 16);
         ctx.clip();
-        ctx.drawImage(avatar, PAD, PAD, avatarSize, avatarSize);
+        // 和网页一致：整张卡**等比缩放**填进方形框（不裁切、不变形），居中显示。
+        // 之前用的 cover 会裁成正方形，所以只看到脸；网页上能看到肩膀，就是整张缩进去的。
+        const _sw = avatar.naturalWidth, _sh = avatar.naturalHeight;
+        const _k = Math.min(avatarSize / _sw, avatarSize / _sh);
+        const _dw = _sw * _k, _dh = _sh * _k;
+        ctx.drawImage(avatar, PAD + (avatarSize - _dw) / 2, PAD + (avatarSize - _dh) / 2, _dw, _dh);
         ctx.restore();
     } else {
         ctx.fillStyle = "rgba(255,255,255,.08)";
@@ -425,16 +432,16 @@ export async function exportB25(record, extras) {
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
     ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 26px system-ui, 'Microsoft YaHei', sans-serif";
+    ctx.font = "bold 29px system-ui, 'Microsoft YaHei', sans-serif";
     ctx.fillText(record.playerName || info.name || "（未命名）", left, PAD + 6);
 
     const rank = rankFor(info.exp ?? 0, extras);
-    const subY = PAD + 50;
+    const subY = PAD + 56;    // 62 x 0.9
     let chipX = left;
     if (rank != null) {
         const chip = `RANK ${rank}`;
-        ctx.font = "bold 14px system-ui, sans-serif";
-        const cw = ctx.measureText(chip).width + 20;
+        ctx.font = "bold 15px system-ui, sans-serif";
+        const cw = ctx.measureText(chip).width + 26;
         ctx.fillStyle = "rgba(118,103,222,.28)";
         roundRect(ctx, chipX, subY - 2, cw, 24, 9);
         ctx.fill();
@@ -444,11 +451,11 @@ export async function exportB25(record, extras) {
     }
     if (record.accountId) {
         ctx.fillStyle = "#a5a3bf";
-        ctx.font = "14px system-ui, 'Microsoft YaHei', sans-serif";
+        ctx.font = "15px system-ui, 'Microsoft YaHei', sans-serif";
         ctx.fillText(`ID ${record.accountId}`, chipX, subY + 4);
     }
     ctx.fillStyle = "#a5a3bf";
-    ctx.font = "13px system-ui, 'Microsoft YaHei', sans-serif";
+    ctx.font = "14px system-ui, 'Microsoft YaHei', sans-serif";
     ctx.fillText(`共 ${stats.total_songs ?? stats.count} 首有记录`
         + `　FC ${stats.fc_count ?? "-"} / AP ${stats.ap_count ?? "-"}`, left, subY + 32);
 
@@ -462,7 +469,7 @@ export async function exportB25(record, extras) {
     ctx.font = "bold 56px system-ui, 'Microsoft YaHei', sans-serif";
     ctx.fillText(num(stats.rating_avg), width - PAD, PAD + 24);
     ctx.fillStyle = "#8f8da8";
-    ctx.font = "13px system-ui, 'Microsoft YaHei', sans-serif";
+    ctx.font = "14px system-ui, 'Microsoft YaHei', sans-serif";
     ctx.fillText(ratingText, width - PAD, PAD + 92);
     const ratingLeft = width - PAD - Math.max(ctx.measureText(ratingText).width, 120);
     ctx.textAlign = "left";
@@ -471,25 +478,33 @@ export async function exportB25(record, extras) {
     const medal = medalFor(total, extras);
     // 牌子的位置要和网页一致：紧贴用户信息块的右侧（不是按 Rating 反推）。
     // 网页上是 flex 的 20px 间距，这里按用户文字的实际宽度量出来。
-    const hsrW = 224, hsrH = 58;
-    ctx.font = "bold 26px system-ui, 'Microsoft YaHei', sans-serif";
-    const userW = Math.max(
-        ctx.measureText(record.playerName || info.name || "（未命名）").width,
-        ctx.measureText(`共 ${stats.total_songs ?? stats.count} 首有记录`
-            + `　FC ${stats.fc_count ?? "-"} / AP ${stats.ap_count ?? "-"}`).width,
-        240);
-    const hsrX = Math.min(left + userW + 20, ratingLeft - 28 - hsrW);
+    // 框高必须包住：硬币(34) + 间距 + 星星(12)，从 hsrY+8 起算到 hsrY+68，再留 12 下边距
+    const hsrW = 250, hsrH = 90;
+    ctx.font = "bold 29px system-ui, 'Microsoft YaHei', sans-serif";
+    const _wName = ctx.measureText(record.playerName || info.name || "（未命名）").width;
+    ctx.font = "14px system-ui, 'Microsoft YaHei', sans-serif";   // 和实际绘制字号一致，否则量出来偏大
+    const _wCounts = ctx.measureText(`共 ${stats.total_songs ?? stats.count} 首有记录`
+        + `　FC ${stats.fc_count ?? "-"} / AP ${stats.ap_count ?? "-"}`).width;
+    // 最宽的一行其实是「RANK 芯片 + ID」，必须一起量，否则盒子会压到 ID
+    ctx.font = "bold 15px system-ui, sans-serif";
+    const _chipW = (rank != null) ? ctx.measureText(`RANK ${rank}`).width + 26 + 10 : 0;
+    ctx.font = "15px system-ui, 'Microsoft YaHei', sans-serif";
+    const _idW = record.accountId ? ctx.measureText(`ID ${record.accountId}`).width : 0;
+    const userW = Math.max(_wName, _chipW + _idW, _wCounts, 130);
+    const hsrX = left + userW + 8;   // 紧贴个人信息，只留几像素
     const hsrY = PAD + 16;
     ctx.fillStyle = "rgba(118,103,222,.14)";
     roundRect(ctx, hsrX, hsrY, hsrW, hsrH, 12);
     ctx.fill();
-    if (medal) drawMedal(ctx, medal, hsrX + 14, hsrY + 8);
+    if (medal) drawMedal(ctx, medal, hsrX + 16, hsrY + 7);
     ctx.fillStyle = "#c8c4e6";
     ctx.font = "11px system-ui, sans-serif";
-    ctx.fillText("HIGH SCORE RATING", hsrX + 60, hsrY + 11);
+    ctx.textAlign = "right";
+    ctx.fillText("HIGH SCORE RATING", hsrX + hsrW - 16, hsrY + 28);
     ctx.fillStyle = "#ffffff";
     ctx.font = "bold 25px system-ui, sans-serif";
-    ctx.fillText(int(total), hsrX + 60, hsrY + 26);
+    ctx.fillText(int(total), hsrX + hsrW - 16, hsrY + 46);
+    ctx.textAlign = "left";
 
     // ---- 卡片 ----
     const images = await Promise.all(entries.map(e => loadImage(jacketUrl(e))));
