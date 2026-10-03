@@ -4,6 +4,28 @@ const BASE = process.env.OURNOTES_BROWSER_URL || 'http://127.0.0.1:8877/ournotes
 const DEST = path.resolve(process.argv[2]);
 const reports = [], errors = [], requests = [], blockedInjections = [];
 
+/**
+ * 卡池大小必须跟着数据快照走。
+ * 快照优先取 browser/snapshot-override（「一键更新数据.bat」刷新出来的），
+ * 没有覆盖层时才回退到上游 zip 里那份固定快照。
+ */
+function snapshotCounts() {
+    const raw = path.join(__dirname, '..', 'snapshot-override', 'research', '2026-10-01', 'raw');
+    const table = (name) => {
+        const file = path.join(raw, name + '.json');
+        if (!fs.existsSync(file)) return null;
+        const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+        const rows = Array.isArray(parsed) ? parsed : (parsed._allData || []);
+        return rows.length;
+    };
+    const songs = table('MasterLiveMusic');
+    const members = table('MasterMemberCard');
+    if (songs === null || members === null) {
+        throw new Error('找不到数据快照：' + raw);
+    }
+    return {songs, members};
+}
+
 function key(row, objective) {
   const other = objective === 'event_pt' ? 'shop_pt' : 'event_pt';
   return [row.totals[objective], row.totals[other], row.totals.cp_remaining,
@@ -49,8 +71,14 @@ function compare(actual, expected) {
     assert.equal(await page.locator('#loadError').isVisible(),false);
     const bootstrap=await page.evaluate(()=>Planner.request('/api/bootstrap'));
     assert.equal(bootstrap.catalog.version,require('../upstream.json').version);
-    assert.equal(bootstrap.catalog.songs.length,85);
-    assert.equal(bootstrap.catalog.members.length,63);
+    // 卡池大小跟着**数据快照**走，而快照可以用「一键更新数据.bat」刷新，
+    // 所以别再写死 85 / 63 这类魔数。
+    // 注意两者规则不同：乐曲会按「上线时间」过滤（快照 87 行、实际放出 85 首），
+    // 成员卡不过滤，可以直接对齐行数。
+    const expected=snapshotCounts();
+    assert.ok(bootstrap.catalog.songs.length>=85,
+        '乐曲数不应少于 85，实际 '+bootstrap.catalog.songs.length);
+    assert.equal(bootstrap.catalog.members.length,expected.members);
     assert.equal(bootstrap.calibration.power_recomputed,false);
     assert.equal(bootstrap.demo.is_demo,false);
     assert.ok(bootstrap.catalog.members.every(card=>card.thumbnail.startsWith('card-images/')));

@@ -8,3 +8,18 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+# 本机私密凭据（CDN Basic auth 等）——绝不进仓库
+browser/secrets.local.json
+secrets.local.json
+
+# 打包产物：114 MB，由 release/打包.ps1 现场生成
+release/
+
+# 我本机调试用的一次性脚本 / 截图，不属于项目
+/_*.py
+/*.png
+/browser/_*.py
+/browser/*.png
+/browser/tests/_*.cjs
+/browser/tests/*.png

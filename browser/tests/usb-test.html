@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>WebUSB 诊断 —— Our Notes 配队网页版</title>
+<style>
+  body{font:14px/1.7 system-ui,-apple-system,"Microsoft YaHei",sans-serif;max-width:900px;margin:24px auto;padding:0 16px;color:#2f2b45}
+  h1{font-size:1.2rem}
+  button{font:inherit;padding:8px 14px;margin:4px 6px 4px 0;border:1px solid #c9c4e8;border-radius:8px;background:#f7f5ff;cursor:pointer}
+  button:disabled{opacity:.5;cursor:default}
+  pre{background:#f6f5fb;border:1px solid #e6e3f5;border-radius:10px;padding:12px;white-space:pre-wrap;word-break:break-all;min-height:120px}
+  .ok{color:#1a7f37}.bad{color:#b42318}.warn{color:#a15c00}
+  code{background:#f1eefc;padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+<h1>WebUSB 诊断</h1>
+<p>这个页面只做一件事：把浏览器眼里的 USB 设备原样打印出来。依次点下面三个按钮，把输出整段发回去。</p>
+<p>
+  <button id="b1">① 列出已授权的设备</button>
+  <button id="b2">② 请求设备（<b>不加任何过滤器</b>）</button>
+  <button id="b3">③ 请求设备（<b>只匹配 ADB 接口</b>，即配队页用的那个）</button>
+  <button id="bc">清空</button>
+</p>
+<pre id="log">等待操作…</pre>
+
+<script type="module">
+const log = document.getElementById("log");
+const lines = [];
+function w(text, cls) {
+    lines.push(cls ? `<span class="${cls}">${text}</span>` : text);
+    log.innerHTML = lines.join("\n");
+}
+function clear() { lines.length = 0; log.textContent = ""; }
+document.getElementById("bc").onclick = clear;
+
+function hex(n, width = 2) { return "0x" + Number(n).toString(16).padStart(width, "0"); }
+
+// Chrome 的 WebUSB 保护类：出现这些接口时，浏览器可能拒绝把设备交给网页
+const PROTECTED = {
+    0x01: "音频", 0x03: "HID(键鼠)", 0x08: "大容量存储", 0x0b: "智能卡",
+    0x0e: "视频", 0xe0: "无线/RNDIS",
+};
+
+function describe(device) {
+    const out = [];
+    out.push(`  设备 ${hex(device.vendorId, 4)}:${hex(device.productId, 4)}  ` +
+        `名称=${device.productName || "(无)"}  序列号=${device.serialNumber || "(无)"}`);
+    out.push(`    opened=${device.opened}  configurations=${device.configurations.length}`);
+    for (const cfg of device.configurations) {
+        out.push(`    配置 ${cfg.configurationValue}：${cfg.interfaces.length} 个接口`);
+        for (const intf of cfg.interfaces) {
+            for (const alt of intf.alternates) {
+                const cls = alt.interfaceClass;
+                const tag = PROTECTED[cls] ? `  ★ 保护类：${PROTECTED[cls]}` : "";
+                const adb = (cls === 0xff && alt.interfaceSubclass === 0x42 && alt.interfaceProtocol === 0x01)
+                    ? "  ← ADB 接口" : "";
+                out.push(`      接口 ${alt.interfaceNumber} alt ${alt.alternateSetting}  ` +
+                    `class=${hex(cls)} subclass=${hex(alt.interfaceSubclass)} protocol=${hex(alt.interfaceProtocol)}${tag}${adb}`);
+            }
+        }
+    }
+    return out.join("\n");
+}
+
+document.getElementById("b1").onclick = async () => {
+    w("\n=== ① navigator.usb.getDevices()（已授权）===");
+    if (!navigator.usb) { w("这个浏览器没有 WebUSB（navigator.usb 为空）", "bad"); return; }
+    const list = await navigator.usb.getDevices();
+    w(`共 ${list.length} 个`);
+    for (const d of list) w(describe(d), "ok");
+};
+
+async function request(label, options) {
+    w(`\n=== ${label} ===`);
+    if (!navigator.usb) { w("这个浏览器没有 WebUSB", "bad"); return; }
+    try {
+        const device = await navigator.usb.requestDevice(options);
+        if (!device) { w("没有选择设备（取消，或「连接」是灰的）", "warn"); return; }
+        w("已选中：" + device.productName, "ok");
+        w(describe(device), "ok");
+        // 试着打开，看能不能真的拿到接口
+        try {
+            await device.open();
+            w("  open() 成功", "ok");
+            if (device.configuration === null) { await device.selectConfiguration(1); w("  selectConfiguration(1) 成功", "ok"); }
+            for (const intf of device.configuration.interfaces) {
+                const alt = intf.alternate;
+                if (alt.interfaceClass === 0xff && alt.interfaceSubclass === 0x42) {
+                    try { await device.claimInterface(intf.interfaceNumber); w(`  claimInterface(${intf.interfaceNumber}) ADB 接口 成功 ✓`, "ok"); }
+                    catch (e) { w(`  claimInterface(${intf.interfaceNumber}) 失败：${e.message}`, "bad"); }
+                }
+            }
+        } catch (e) {
+            w("  open/claim 出错：" + e.message, "bad");
+        }
+    } catch (e) {
+        w("requestDevice 抛错：" + e.name + " " + e.message, "bad");
+    }
+}
+
+document.getElementById("b2").onclick = () => request("② requestDevice({filters: []}) 不加过滤器", {filters: []});
+document.getElementById("b3").onclick = () => request(
+    "③ requestDevice({filters:[{classCode:0xff,subclassCode:0x42,protocolCode:0x01}]})",
+    {filters: [{classCode: 0xff, subclassCode: 0x42, protocolCode: 0x01}]});
+
+w("这个浏览器支持 WebUSB: " + (navigator.usb ? "是" : "否"));
+w("当前页面被跨域隔离: " + crossOriginIsolated);
+</script>
+</body>
+</html>

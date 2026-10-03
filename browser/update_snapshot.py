@@ -27,6 +27,8 @@ import base64
 import gzip
 import json
 import os
+import json
+import os
 import re
 import struct
 import subprocess
@@ -48,8 +50,39 @@ from rijndael import Rijndael  # noqa: E402
 
 API_HOST = "https://l14-prod-hk-all-gs-sirius.gamerfusiontech.com"
 BASE_ROOT = "https://l14-prod-hk-patch-sirius.gamerfusiontech.com/prod/hk_27f3c91e8b62d6056c7a19f2e83b6d10"
-AUTH = "sirius:__CDN_AUTH_REMOVED__"
 UA = "UnityPlayer/6000.3.12f1 (UnityWebRequest/1.0, libcurl/8.10.1-DEV)"
+
+
+def _local_secret(name):
+    """读取本机私密凭据。凭据不进仓库，按顺序找：
+
+    ① 环境变量             OURNOTES_CDN_AUTH
+    ② browser/secrets.local.json   （已被 .gitignore 挡住）
+
+    以前这里把 CDN 的 Basic 凭据写死在常量里，仓库一公开就等于把凭据送出去了。
+    """
+    env = "OURNOTES_" + name.upper()
+    v = os.environ.get(env)
+    if v:
+        return v.strip()
+    f = HERE / "secrets.local.json"
+    if f.exists():
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except Exception as e:
+            raise SystemExit("%s 解析失败：%s" % (f, e))
+        v = (data.get(name) or "").strip()
+        if v:
+            return v
+    return None
+
+
+# CDN 的 Basic 凭据：纯服务端凭据，只从环境变量/本机密文读，仓库里没有。
+AUTH = _local_secret("cdn_auth")
+
+# 账号包解密密钥。这个不是「秘密」：网页端 account-package.js 必须把它发给每个
+# 访问者才能解密用户自己上传的账号包，所以它随构建产物本来就是公开的。
+# 这里保留同一份，方便本地脚本解密账号包做自测。
 KEY = bytes.fromhex("0532791c510a08eb7ede6b46c6ba71ea9aa2a3cfb678a595f89d67c8a5e493b6")
 
 OVERRIDE = HERE / "snapshot-override"
@@ -62,6 +95,13 @@ def _get(url, auth=True, timeout=180):
     req = urllib.request.Request(url)
     req.add_header("User-Agent", UA)
     if auth:
+        if not AUTH:
+            raise SystemExit(
+                "缺少 CDN 凭据，无法下载游戏资源。请任选一种方式配置：\n"
+                "  ① 设环境变量  OURNOTES_CDN_AUTH=用户名:密码\n"
+                "  ② 新建 browser/secrets.local.json，内容 {\"cdn_auth\": \"用户名:密码\"}\n"
+                "（该文件已被 .gitignore 忽略，不会被提交。）"
+            )
         req.add_header("Authorization", "Basic " + base64.b64encode(AUTH.encode()).decode())
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()

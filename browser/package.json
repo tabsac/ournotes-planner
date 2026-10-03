@@ -11,6 +11,10 @@
     "dev": "vite --host 127.0.0.1"
   },
   "dependencies": {
+    "@yume-chan/adb": "2.6.4",
+    "@yume-chan/adb-credential-web": "2.1.0",
+    "@yume-chan/adb-daemon-webusb": "2.3.2",
+    "@yume-chan/stream-extra": "2.6.1",
     "or-tools-wasm": "0.9.1",
     "pyodide": "314.0.7",
     "protobufjs": "7.5.4",
