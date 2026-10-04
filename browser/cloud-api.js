@@ -136,9 +136,14 @@ function notifyAuth() {
 function clearSession() {
     setToken(null);
     setAccount(null);
-    // ⚠️ 关联指针（本地这条数据 ↔ 云端哪一条）是**跟着账号**的：
-    //    清 token 时不清它，换个账号登录就会拿旧 id 去 PUT → 服务端按 owner 校验返回 404
-    //    → 界面「同步失败」而且没有重新关联的入口（v0.3.0 线上发现）。
+    // ⚠️ 这里**不**清「关联云端结果」指针：
+    //    改密/401 之后用户往往还是同一个账号，重新登录后那条关联仍然有效；
+    //    一清就会在下一次上传时**另建一条**（重复堆积）。跨账号由 `linkedResult()` 的
+    //    accountId 比对挡住（不同账号直接当作没有关联），显式登出才真正清掉。
+}
+
+/** 显式登出：这次是用户意图，关联指针也一并清掉。 */
+function clearLinks() {
     setLinkedResult(null, "b25");
     setLinkedResult(null, "profile");
 }
@@ -288,6 +293,7 @@ export async function logout() {
         try { await request("/api/logout", {method: "POST"}); } catch { /* 撤销失败也要退出 */ }
     }
     clearSession();
+    clearLinks();
     notifyAuth();
 }
 
@@ -403,14 +409,29 @@ export function deleteResult(id) {
     return request("/api/results/" + encodeURIComponent(id), {method: "DELETE"});
 }
 
-/** 关联记录（本机某条本地数据 ↔ 云端哪一条），供「覆盖更新」用。 */
+/** 关联记录（本机某条本地数据 ↔ 云端哪一条），供「覆盖更新」用。
+ *
+ * 指针是**跟着账号**的：记的时候带上 accountId，读的时候若与当前账号不符就当没有
+ * （并顺手清掉）。这样「换账号登录还拿旧 id 去 PUT → 404」不会再发生，
+ * 而同账号重新登录（改密/401 之后）仍然认得回原来那条。 */
 export function linkedResult(which = "b25") {
     const raw = read(which === "profile" ? PROFILE_RESULT_KEY : RESULT_KEY);
     if (!raw) return null;
-    try { return JSON.parse(raw); } catch { return null; }
+    let info = null;
+    try { info = JSON.parse(raw); } catch { return null; }
+    const accountId = currentAccount()?.id;
+    if (info && info.accountId && accountId && info.accountId !== accountId) {
+        setLinkedResult(null, which);
+        return null;
+    }
+    return info;
 }
 
 export function setLinkedResult(info, which = "b25") {
+    if (info && !info.accountId) {
+        const accountId = currentAccount()?.id;
+        if (accountId) info = {...info, accountId};
+    }
     write(which === "profile" ? PROFILE_RESULT_KEY : RESULT_KEY, info ? JSON.stringify(info) : null);
 }
 

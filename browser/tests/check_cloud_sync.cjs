@@ -373,6 +373,43 @@ const click = async (page, selector, settle = 700) => {
         st = await pageState(a.page);
         check(st.error && /太快|限流/.test(st.msg || ""), "连续 503 给出「操作太快」提示", st.msg);
 
+        // ---- ⑧b 卡库冲突：选择框（服务端 409 语义没变，缺的是 UI 出路）----
+        console.log("\n[8b] 卡库冲突：用云端覆盖本机 / 保留本机另存");
+        const tokenNow = await a.page.evaluate(() => localStorage.getItem("ournotes-cloud-token"));
+        const linkNow = await a.page.evaluate(() => JSON.parse(localStorage.getItem("ournotes-cloud-profile") || "null"));
+        check(!!linkNow?.id, "本机已关联一条云端卡库", JSON.stringify(linkNow));
+        await api("/api/internal/touch-result", {method: "POST", body: JSON.stringify({id: linkNow.id, by: 1})});
+        await gotoCloud(a.page);
+        await click(a.page, "#cloudProfilePush", 1500);
+        st = await pageState(a.page);
+        const conflictShown = await a.page.locator("#cloudConflictKeep").count();
+        check(/冲突/.test(st.profileLine || "") && conflictShown === 1,
+            "服务端 409 时出现冲突选择框", st.profileLine);
+        await click(a.page, "#cloudConflictKeep", 1800);
+        st = await pageState(a.page);
+        const kept = a.net.filter(r => r.method === "POST" && /\/api\/results$/.test(r.url)).pop();
+        check(!!kept && kept.status === 201, "「保留本机」→ 另存为云端新的一份（POST 201）",
+            a.net.map(r => `${r.method} ${r.status}`).join(" | "));
+        check(/已同步/.test(st.profileLine || ""), "另存后状态回到已同步", st.profileLine);
+
+        // 再把「云端那份」改掉，制造第二次冲突 → 用云端覆盖本机
+        const linkNew = await a.page.evaluate(() => JSON.parse(localStorage.getItem("ournotes-cloud-profile") || "null"));
+        const cloudCopy = await (await api("/api/results/" + linkNew.id,
+            {headers: {Authorization: "Bearer " + tokenNow}})).json();
+        cloudCopy.payload.document.name = "云端改过的卡库";
+        await api("/api/results/" + linkNew.id, {
+            method: "PUT",
+            headers: {Authorization: "Bearer " + tokenNow},
+            body: JSON.stringify({payload: cloudCopy.payload, version: cloudCopy.version}),
+        });
+        await api("/api/internal/touch-result", {method: "POST", body: JSON.stringify({id: linkNew.id, by: 1})});
+        await click(a.page, "#cloudProfilePush", 1500);
+        check(await a.page.locator("#cloudConflictPull").count() === 1, "第二次冲突同样给出选择框");
+        a.page.once("dialog", dialog => dialog.accept());
+        await click(a.page, "#cloudConflictPull", 1800);
+        const nameAfter = await a.page.evaluate(() => document.getElementById("profileName").textContent.trim());
+        check(nameAfter === "云端改过的卡库", "「用云端覆盖本机」把云端那份装回本页", nameAfter);
+
         // ---- ⑨ token 失效后自动回登录页 ----
         console.log("\n[9] token 被服务端清掉后自动回登录页");
         await a.page.evaluate(() => localStorage.setItem("ournotes-cloud-token", "t_bogus_token_value"));
@@ -385,13 +422,27 @@ const click = async (page, selector, settle = 700) => {
         st = await pageState(a.page);
         check(st.loginVisible, "无效 token 被清掉并显示登录表单", st.submitLabel);
         check(await a.page.evaluate(() => localStorage.getItem("ournotes-cloud-token")) === null, "本地 token 已清空");
+        // 关联指针语义（v0.3.2 定死）：**改密/401 不清**（同账号重新登录还要认得回来），
+        // 但**显式登出**要清干净 —— 服务器侧之前实测「登出后 ournotes-cloud-* 一个不剩」。
+        check(await a.page.evaluate(() => localStorage.getItem("ournotes-cloud-profile")) !== null,
+            "改密/401 之后关联指针还在（同账号重登仍认得回云端那条卡库）");
+        await fill(a.page, "#cloudUsername", USERNAME);
+        await fill(a.page, "#cloudPassword", NEW_PASSWORD);
+        await click(a.page, "#cloudSubmit", 1500);
+        await click(a.page, "#cloudLogout", 1200);
+        const cloudKeys = await a.page.evaluate(() =>
+            Object.keys(localStorage)
+                .filter(key => key.startsWith("ournotes-cloud-"))
+                // api-base 是**测试注入**的（生产上来自构建期 meta），不算会话残留
+                .filter(key => key !== "ournotes-cloud-api-base"));
+        check(cloudKeys.length === 0, "显式登出后会话与关联指针都不剩", JSON.stringify(cloudKeys));
 
         await a.page.screenshot({path: path.join(SHOT_DIR, "account-page.png")});
-        // 预期噪音：① 故意造出来的 401/503；② **测试夹具**缺几张卡面导致的图片 404
+        // 预期噪音：① 故意造出来的 401/409/503；② **测试夹具**缺几张卡面导致的图片 404
         //（app 自带重试，另有 check_images.cjs 覆盖）—— 都不是这次改动的问题
-        const noise = t => /401/.test(t) || /503/.test(t)
+        const noise = t => /401/.test(t) || /409/.test(t) || /503/.test(t)
             || /(card-images|avatar-images|jacket-images|ui-images)\/.*\.webp/.test(t)
-            || /Failed to load resource.*(404|503)/.test(t);
+            || /Failed to load resource.*(404|409|503)/.test(t);
         check(a.bad.filter(t => !noise(t)).length === 0, "A 设备除预期的 401/夹具缺图外没有报错",
             a.bad.filter(t => !noise(t)).slice(0, 3).join(" | "));
         check(b.bad.filter(t => !noise(t)).length === 0, "B 设备除预期的 401/夹具缺图外没有报错",
@@ -408,12 +459,12 @@ const click = async (page, selector, settle = 700) => {
         } else if (meta[1] !== "") {
             check(false, "同源构建里 api-base 必须是空串", meta[1]);
         } else {
-            // 同一份 dist，另起一个预览把 `/api` 也代理到替身后端（模拟 on.tabsac.com 的同源形态）。
-            // ⚠️ 代理会**去掉** `--api-prefix`，所以上游 base 要带 `/api`，否则 `/api/register` 会被转成 `/register`。
+            // 同一份 dist，另起一个预览把 `/api` 与 `/data` 都**原样**代理到替身后端
+            //（模拟 on.tabsac.com 的同源形态：nginx 就是这么配的两个 location）。
             const sameOriginPort = PREVIEW_PORT + 1;
             await launch(PYTHON, ["-B", path.join(__dirname, "preview_server.py"),
-                "--port", String(sameOriginPort), "--api-proxy", `http://127.0.0.1:${API_PORT}/api`,
-                "--api-prefix", "/api"], "Static preview:");
+                "--port", String(sameOriginPort), "--api-proxy", `http://127.0.0.1:${API_PORT}`,
+                "--api-prefix", "/api,/data", "--api-strip", "false"], "Static preview:");
             const ctxC = await browser.newContext({viewport: {width: 1280, height: 1000}});
             // 注意要打开**同源预览那个端口**（8880），否则请求还是打到 8879 的前缀代理上
             const c = await openApp(ctxC, {
@@ -477,6 +528,49 @@ const click = async (page, selector, settle = 700) => {
             })();
             check(putSeen, "本地改动会自动 PUT 推上去（debounce 合并）",
                 c.net.map(r => `${r.method} ${r.status}`).join(" | ") || "(没有请求)");
+
+            // ---- ⑩c 远端只读数据：字节校验 + 与内置快照比对 + 陈旧提醒 ----
+            // 替身后端是**从 snapshot-digest.json 反推**出 songs.json 的，所以这里必须报「一致」；
+            // 再用内部接口改一首歌，必须精确报出「1 处等级变化」并弹提醒。
+            console.log("\n[10c] /data 只读数据：校验 / 比对 / 陈旧提醒");
+            await c.page.locator('.tabs button[data-tab="software"]').click();
+            await c.page.waitForSelector("#dataStatusRoot .data-status", {timeout: 20000});
+            const readData = () => c.page.evaluate(() => {
+                const box = document.getElementById("dataStatusRoot");
+                const rows = {};
+                for (const tr of box.querySelectorAll("tr")) {
+                    const key = tr.querySelector("th")?.textContent.trim();
+                    if (key) rows[key] = tr.querySelector("td")?.textContent.trim();
+                }
+                return {rows, notice: document.getElementById("remoteDataNotice")?.textContent.trim() || ""};
+            });
+            let data = await readData();
+            check(/2026-10-05/.test(data.rows["线上数据版本"] || ""), "读到线上数据版本",
+                data.rows["线上数据版本"]);
+            check(/通过/.test(data.rows["字节校验（fileDigests）"] || ""), "字节校验通过（sha256 对得上）",
+                data.rows["字节校验（fileDigests）"]);
+            check(/一致/.test(data.rows["曲目数据与内置快照"] || ""), "与内置快照一致",
+                data.rows["曲目数据与内置快照"]);
+            check(/与内置一致/.test(data.rows["线上当前活动"] || ""), "当前活动与内置一致",
+                data.rows["线上当前活动"]);
+            check(/未使用/.test(data.rows["卡牌数据（cards.json）"] || ""), "cards.json 如实标注未使用",
+                data.rows["卡牌数据（cards.json）"]);
+            check(!data.notice, "一致时没有顶部提醒", data.notice || "(无)");
+
+            console.log("     改一首歌的等级 → 重新检查");
+            await api("/api/internal/mutate-data", {
+                method: "POST", body: JSON.stringify({id: 100001, difficulty: "EXPERT", display: 26})});
+            await click(c.page, "#dataStatusRefresh", 2500);
+            data = await readData();
+            check(/不一致/.test(data.rows["曲目数据与内置快照"] || "")
+                  && /等级变化 1/.test(data.rows["曲目数据与内置快照"] || ""),
+                "改一处等级后精确报出「1 处等级变化」", data.rows["曲目数据与内置快照"]);
+            const diffRow = await c.page.evaluate(() =>
+                [...document.querySelectorAll("#dataStatusRoot tr td")]
+                    .map(td => td.textContent).find(text => /EXPERT 等级/.test(text)) || "");
+            check(/25 → 26/.test(diffRow), "差异明细写明 25 → 26", diffRow.slice(0, 60));
+            check(/线上曲目数据与内置快照不一致/.test(data.notice) && /仍使用内置快照/.test(data.notice),
+                "顶部弹出「线上数据变了、计算仍用内置快照」的提醒", data.notice.slice(0, 80));
             await ctxC.close();
         }
     } catch (error) {

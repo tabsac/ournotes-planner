@@ -1,5 +1,5 @@
 {
-  "browser_version": "0.3.1",
+  "browser_version": "0.3.2",
   "core_version": "0.2.5",
   "public_source_sha256": "396a5b670f8e15f7ce3e5582ca9ed114658d40de801f9d7233351027888ca914",
   "runtime_sha256": "25892bf10a87e6898a641c0f536d694b367f8c9801f53a6831e68fd2d7b75916",
@@ -906,6 +906,7 @@
     "planner-runtime.zip": "25892bf10a87e6898a641c0f536d694b367f8c9801f53a6831e68fd2d7b75916",
     "service-worker.js": "0a532405efe0789adb48bdafcd8a6ebda2565660658c5a6bf907112d587dc290",
     "static-data/b25-extra.json": "935559367616c2179841ccec7a27317bf02cbd047b7e2eae6917dd65b2fddea3",
+    "static-data/snapshot-digest.json": "42bcf5288f0967d6bfe03febad797f070d554ce49aeabb52b81371e31a662a18",
     "THIRD-PARTY-NOTICES.txt": "ff69de836664f5dee3faa37e78124ac3b965792ba78e58c6ba69efb0ad6835c4",
     "ui-images/coin.webp": "ca9b13757f3dc877ebe29d4693c102c03e9f68fa4bf1bd713874532f0353ed93",
     "ui-images/grade-bronze.webp": "58caa91ce77175627de6169ed3ca686d5a509d974c1313ba84d0eeb46beef5ea",

@@ -1,15 +1,19 @@
 /**
  * 账号系统（v2）的**本地替身** —— 按《网页-服务器对接-账号系统变更.md》实现。
  *
- * 用途：在没有真实服务器时端到端测网页（注册/登录/me/改密/绑定 QQ/结果/503 限流）。
- * 另外带两个**测试专用**内部接口：
- *   POST /api/internal/bind      {code, qq}   模拟机器人在 QQ 里收到 `/on绑定网页 <码>`
- *   POST /api/internal/status503 {count}      让接下来 count 个请求回 nginx 那种 503 HTML
+ * 用途：在没有真实服务器时端到端测网页（注册/登录/me/改密/绑定 QQ/结果/503 限流/只读数据）。
+ * 另外带几个**测试专用**内部接口：
+ *   POST /api/internal/bind        {code, qq}   模拟机器人在 QQ 里收到 `/on绑定网页 <码>`
+ *   POST /api/internal/status503   {count}      让接下来 count 个请求回 nginx 那种 503 HTML
+ *   POST /api/internal/touch-result{id, by}     模拟「另一台设备改过这条结果」→ version 顶上去（制造 409）
+ *   POST /api/internal/mutate-data {id, display, combo}  模拟「线上曲目数据变了」
  *
  *   node browser/tests/mock_account_api.cjs 8907
  */
 const http = require("http");
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 
 const PORT = Number(process.argv[2] || 8907);
 const MAX_PAYLOAD = 256 * 1024;
@@ -24,6 +28,68 @@ const results = new Map();    // id -> {id, accountId, title, summary, payload, 
 let counter = 0;
 let pending503 = 0;
 let failLogins = 0;           // 该账号连续密码错误次数（≥10 → 429）
+
+/* ---------------------------------------------------------------- 只读数据 */
+// 按服务器契约产出 /data/*：fileDigests（线上字节的 sha256）+ contentDigests（去时间戳后的规范化 sha256）。
+//
+// ⚠️ 关键：**从构建产物里的 snapshot-digest.json 反推** songs.json，
+//    这样「远端数据 == 内置快照」是**构造出来**的，网页端比对必须报「一致」；
+//    内部接口 mutate-data 改一首歌，就能精确模拟「线上数据变了 N 处」。
+const DIGEST_FILE = path.join(__dirname, "../dist/static-data/snapshot-digest.json");
+const BUNDLED = JSON.parse(fs.readFileSync(DIGEST_FILE, "utf8"));
+const DIFFS = ["EASY", "NORMAL", "HARD", "EXPERT"];
+
+const dataSongs = {
+    generated: "2026-10-05T00:00:00Z",
+    count: Object.keys(BUNDLED.songsById).length,
+    note: "mock（由内置快照反推，保证「一致」可测）",
+    songs: Object.entries(BUNDLED.songsById)
+        .sort((a, b) => Number(a[0]) - Number(b[0]))
+        .map(([id, key]) => ({
+            id: Number(id),
+            title: `乐曲 ${id}`,
+            charts: key.split("|").map((part, index) => {
+                const [level, combo] = part.split("/");
+                const display = Number(level);
+                const chart = {name: DIFFS[index], level: Math.floor(display), display};
+                if (combo !== "") chart.combo = Number(combo);
+                return chart;
+            }),
+        })),
+};
+const dataEvents = {generated: "2026-10-05T00:00:00Z", count: 1,
+    currentEventId: (BUNDLED.event && BUNDLED.event.id) || 1, note: "mock",
+    events: [{id: (BUNDLED.event && BUNDLED.event.id) || 1, name: "内置活动（mock）",
+              startAt: (BUNDLED.event && BUNDLED.event.startAt) || "",
+              endAt: (BUNDLED.event && BUNDLED.event.endAt) || "", bonus: []}]};
+const dataCards = {generated: "2026-10-05T00:00:00Z", counts: {characters: 25, memberCards: 64}};
+
+const sha256 = value => crypto.createHash("sha256").update(value).digest("hex");
+
+/** 与服务器一致的口径：去掉 generated/updatedAt，键排序、无空白，再算 sha256。 */
+function canonical(value) {
+    const strip = node => {
+        if (Array.isArray(node)) return node.map(strip);
+        if (node && typeof node === "object") {
+            const out = {};
+            for (const key of Object.keys(node).sort()) {
+                if (key === "generated" || key === "updatedAt") continue;
+                out[key] = strip(node[key]);
+            }
+            return out;
+        }
+        return node;
+    };
+    return JSON.stringify(strip(value));
+}
+
+function dataFiles() {
+    const pairs = [["songs.json", dataSongs], ["cards.json", dataCards], ["events.json", dataEvents]];
+    return Object.fromEntries(pairs.map(([name, value]) => {
+        const raw = JSON.stringify(value);
+        return [name, {raw, fileDigest: sha256(raw), contentDigest: sha256(canonical(value))}];
+    }));
+}
 
 const now = () => Math.floor(Date.now() / 1000);
 const newToken = () => crypto.randomBytes(32).toString("base64url");   // 43 字符
@@ -84,6 +150,26 @@ const server = http.createServer(async (req, res) => {
         pending503 = Number(body?.count || 1);
         return send(res, 200, {pending503}, {origin});
     }
+    // 模拟「另一台设备改了这条结果」：服务端 version 往上顶
+    if (req.method === "POST" && path === "/api/internal/touch-result") {
+        const body = await readBody(req) || {};
+        const row = results.get(String(body.id || ""));
+        if (!row) return fail(res, 404, "not_found", "没有这条结果", origin);
+        row.version += Number(body.by || 1);
+        row.updatedAt = now();
+        return send(res, 200, {id: row.id, version: row.version}, {origin});
+    }
+    // 模拟「线上曲目数据变了」：改某首歌的显示等级/物量
+    if (req.method === "POST" && path === "/api/internal/mutate-data") {
+        const body = await readBody(req) || {};
+        const song = dataSongs.songs.find(item => String(item.id) === String(body.id));
+        if (!song) return fail(res, 404, "not_found", "没有这首歌", origin);
+        const chart = song.charts.find(item => item.name === (body.difficulty || "EXPERT"));
+        if (!chart) return fail(res, 404, "not_found", "没有这个难度", origin);
+        if (body.display !== undefined) chart.display = Number(body.display);
+        if (body.combo !== undefined) chart.combo = Number(body.combo);
+        return send(res, 200, {song}, {origin});
+    }
     if (req.method === "POST" && path === "/api/internal/bind") {
         const body = await readBody(req) || {};
         const code = String(body.code ?? "");
@@ -105,8 +191,31 @@ const server = http.createServer(async (req, res) => {
 
     // ---- 只读数据 ----
     if (req.method === "GET" && path === "/data/version.json") {
-        return send(res, 200, {dataVersion: "2026-10-04", updatedAt: new Date().toISOString()},
-            {origin, headers: {"Cache-Control": "no-cache", ETag: '"v-1"'}});
+        const files = dataFiles();
+        return send(res, 200, {
+            dataVersion: "2026-10-05",
+            updatedAt: new Date().toISOString(),
+            counts: {songs: dataSongs.songs.length, events: dataEvents.events.length},
+            files: Object.keys(files),
+            source: "mock",
+            images: "not-available",
+            fileDigests: Object.fromEntries(Object.entries(files).map(([name, item]) =>
+                [name, {sha256: item.fileDigest, bytes: Buffer.byteLength(item.raw)}])),
+            contentDigests: Object.fromEntries(Object.entries(files).map(([name, item]) =>
+                [name, item.contentDigest])),
+        }, {origin, headers: {"Cache-Control": "no-cache", ETag: '"mock-data"'}});
+    }
+    if (req.method === "GET" && path.startsWith("/data/") && path.endsWith(".json")) {
+        const item = dataFiles()[path.slice("/data/".length)];
+        if (!item) return fail(res, 404, "not_found", "没有这个数据文件", origin);
+        res.writeHead(200, {
+            "Content-Type": "application/json; charset=utf-8",
+            "Content-Length": Buffer.byteLength(item.raw),
+            "Access-Control-Allow-Origin": origin || "*",
+            "Cache-Control": "public, max-age=300",
+            ETag: '"' + item.fileDigest.slice(0, 16) + '"',
+        });
+        return res.end(item.raw);
     }
 
     // ---- 注册 / 登录 ----

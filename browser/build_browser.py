@@ -17,6 +17,10 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 PUBLIC = HERE / "public"
 VERSION = json.loads((HERE / "package.json").read_text("utf-8"))["version"]
+# 内置快照的标识（曲目/谱面/活动都在 snapshot-override 里，随网页一起发布）
+SNAPSHOT_INDEX = json.loads((HERE / "snapshot-override" / "index.json").read_text("utf-8"))
+SNAPSHOT_NAME = Path(SNAPSHOT_INDEX["snapshot_prefix"]).parts[1]        # research/2026-10-01/raw/ → 2026-10-01
+DIFFICULTIES = ("easy", "normal", "hard", "expert")
 
 
 def replace_once(text, old, new):
@@ -136,6 +140,68 @@ def patch_runtime_source(relative, raw):
     return text.encode("utf-8")
 
 
+def snapshot_digest():
+    """把内置快照里「曲目 / 谱面显示等级 / 物量」与「当前活动」摘成一个小 JSON。
+
+    目的：网页端能拿服务器 `/data/*.json` 跟**这份网页真正在用的数据**比 ——
+    相等就说「一致」，不等就提醒用户「线上数据已更新，本页计算仍用内置快照」。
+    ⚠️ 这只用于**比对与提醒**，绝不拿去替换求解用的快照：那份由 `upstream.json` 的 sha256 钉住，
+    验收 oracle 也依赖它（见设计笔记「数据可变的门禁」一节）。
+    """
+    raw = HERE / "snapshot-override" / "research" / SNAPSHOT_NAME / "raw"
+    music = read_snapshot_table(raw, "MasterLiveMusic")
+    scores = {row.get("_id"): row for row in read_snapshot_table(raw, "MasterLiveMusicScore")}
+    by_id = {}
+    for row in music:
+        mid = row.get("_id")
+        if not isinstance(mid, int):
+            continue
+        parts = []
+        for diff in DIFFICULTIES:
+            chart = scores.get(row.get("_%sID" % diff)) or {}
+            level = chart.get("_musicScoreDisplayLevel")
+            if level is None:
+                level = chart.get("_musicScoreLevel")
+            combo = chart.get("_fullComboCount")
+            parts.append("%s/%s" % (format_level(level), "" if combo is None else int(combo)))
+        by_id[str(mid)] = "|".join(parts)
+    canonical = "\n".join("%s:%s" % (key, by_id[key]) for key in sorted(by_id, key=int))
+    digest = hashlib.sha256(("songs=%d\n%s" % (len(by_id), canonical)).encode("utf-8")).hexdigest()
+
+    event = {}
+    events = read_snapshot_table(raw, "MasterEvent")
+    if events:
+        row = events[0]
+        event = {"id": row.get("_id"),
+                 "startAt": str(row.get("_startAt") or ""),
+                 "endAt": str(row.get("_endAt") or "")}
+    return {"snapshot": SNAPSHOT_NAME, "songs": len(by_id), "songsDigest": digest,
+            "songsById": by_id, "event": event,
+            # 顺带带上三张源表的 sha256（来自 snapshot-override/index.json），
+            # 出问题时能一眼看出「这份网页用的是哪一版数据」
+            "tables": {name: SNAPSHOT_INDEX["tables"].get(name)
+                       for name in ("MasterLiveMusic", "MasterLiveMusicScore", "MasterEvent")}}
+
+
+def read_snapshot_table(raw, name):
+    path = raw / (name + ".json")
+    if not path.is_file():
+        raise ValueError("快照里缺少 %s（%s）" % (name, path))
+    rows = json.loads(path.read_text("utf-8"))
+    if isinstance(rows, dict):
+        for key in ("_allData", "rows", "data"):
+            if isinstance(rows.get(key), list):
+                return rows[key]
+    return rows if isinstance(rows, list) else []
+
+
+def format_level(value):
+    if not isinstance(value, (int, float)):
+        return ""
+    text = ("%.2f" % float(value)).rstrip("0").rstrip(".")
+    return text
+
+
 def main():
     upstream = json.loads((HERE / "upstream.json").read_text("utf-8"))
     core_version = upstream["version"]
@@ -224,6 +290,11 @@ def main():
     for item in sorted(static_data.glob("*")):
         if item.is_file():
             shutil.copyfile(item, static_dir / item.name)
+    # 「内置快照摘要」：把**这份网页实际用的**曲目/谱面等级/物量与活动摘出来随站发布，
+    # 好让「账号」页能拿它跟服务器 /data/*.json 比 —— 数据变了就能提醒用户
+    # （求解仍用内置快照，那个由 upstream.json 的 sha256 钉住，不能悄悄换）。
+    (static_dir / "snapshot-digest.json").write_text(
+        json.dumps(snapshot_digest(), ensure_ascii=False, indent=1, sort_keys=True), "utf-8")
     pyodide = HERE / "node_modules/pyodide"
     destination = PUBLIC / "vendor/pyodide"
     destination.mkdir(parents=True, exist_ok=True)
@@ -299,6 +370,12 @@ def main():
         '<div id="profileHint"',
         '<span id="cloudBadge" class="badge cloud-badge" role="button" tabindex="0">云端未启用</span>'
         '<div id="profileHint"')
+    # 「关于网页版」页尾部加一个「数据状态」容器（由 remote-data.js 渲染）
+    html = replace_once(
+        html,
+        '<a href="./THIRD-PARTY-NOTICES.txt" target="_blank" rel="noopener">数据与第三方软件说明</a>',
+        '<div id="dataStatusRoot" class="data-status-box"></div>\n'
+        '<a href="./THIRD-PARTY-NOTICES.txt" target="_blank" rel="noopener">数据与第三方软件说明</a>')
 
     (HERE / "index.html").write_text(html, "utf-8", newline="\n")
     (HERE / "style.css").write_bytes(css + b"\n" + (HERE / "account.css").read_bytes())

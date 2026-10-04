@@ -280,10 +280,22 @@ export function mountCloudPanel(root, options = {}) {
 
     function renderProfile() {
         const sync = state.profileSync || {};
+        const linked = cloud.linkedResult("profile");
         const modeText = {
             off: "未启用", idle: "未同步", dirty: "有改动待上传", syncing: "正在同步…",
             synced: "已同步", conflict: "冲突（别的设备改过）", error: "同步失败",
         }[sync.mode] || sync.mode;
+        // 冲突时给两条出路：用云端覆盖本机 / 保留本机另存为新的一份（服务端 PUT 带旧 version 就是 409）
+        const conflictRow = sync.mode !== "conflict" ? "" : `
+          <div class="cloud-conflict">
+            <b>云端那份卡库被别的设备改过</b>（服务端返回 409，没有自动合并）。
+            <div class="cloud-account-actions">
+              <button type="button" id="cloudConflictPull" class="primary">用云端覆盖本机</button>
+              <button type="button" id="cloudConflictKeep">保留本机（另存为新的一份）</button>
+            </div>
+            <p class="cloud-dim">「用云端覆盖」会先拉回云端那份再装进本页（计算中会拒绝）；
+              「保留本机」会另建一条云端记录，之后以本机为准。</p>
+          </div>`;
         // ⚠️ 列表要**声明式**地画在这里：run() 结束时会再 render() 一次，
         //    如果列表是在事件处理里命令式写进 DOM，就会被这次重画抹掉（踩过）。
         const profiles = state.profiles;
@@ -297,12 +309,14 @@ export function mountCloudPanel(root, options = {}) {
           </div>
           <p class="cloud-dim">状态：<b>${esc(modeText)}</b>${sync.at ? ` · 上次成功 ${esc(whenMs(sync.at))}` : ""}
             ${sync.error ? ` · ${esc(sync.error)}` : ""}${sync.detail ? ` · ${esc(sync.detail)}` : ""}</p>
+          ${conflictRow}
           <div id="cloudProfileListBox">${!profiles ? ""
             : (profiles.length ? `<ul class="cloud-items">${profiles.map(item => `
               <li class="cloud-item">
                 <div class="cloud-item-main">
                   <b>${esc(item.title || "")}</b>
-                  <span class="cloud-dim">${esc(when(item.createdAt))}${item.summary ? ` · ${esc(item.summary)}` : ""}</span>
+                  <span class="cloud-dim">${esc(when(item.createdAt))}${item.summary ? ` · ${esc(item.summary)}` : ""}
+                    ${linked && linked.id === item.id ? " · 本机关联" : ""}</span>
                 </div>
                 <div class="cloud-item-actions">
                   <button type="button" data-cloud-profile="${esc(item.id)}">恢复到本机</button>
@@ -313,6 +327,24 @@ export function mountCloudPanel(root, options = {}) {
             const result = await push();
             setMessage(result?.notice || result?.localNotice || "卡库已上传");
         }));
+        const pullButton = $("cloudConflictPull");
+        if (pullButton) {
+            pullButton.addEventListener("click", () => run(async () => {
+                if (!linked?.id) throw new cloud.CloudError("no_link", "本机没有关联云端卡库，先刷新列表再恢复");
+                if (!window.confirm("用云端那份覆盖本机卡库？本机当前养成会被替换。")) return;
+                const document_ = await pull(linked.id);
+                setMessage(`已用云端那份覆盖本机（${document_?.name || ""}）`);
+            }));
+        }
+        const keepButton = $("cloudConflictKeep");
+        if (keepButton) {
+            keepButton.addEventListener("click", () => run(async () => {
+                cloud.setLinkedResult(null, "profile");       // 断开旧关联 → 下一次是 POST 新建
+                const result = await push();
+                setMessage("已把本机卡库另存为云端新的一份"
+                    + (result?.localNotice ? "；" + result.localNotice : ""));
+            }));
+        }
         $("cloudProfileList").addEventListener("click", () => run(async () => {
             state.profiles = await listCloudProfiles();
             setMessage(state.profiles.length ? `云端有 ${state.profiles.length} 份卡库` : "云端还没有卡库");

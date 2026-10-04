@@ -594,8 +594,23 @@ a.button-link:hover {
 .cloud-item-sum { color: #8f8da8; }
 .cloud-item-actions { display: flex; gap: 6px; flex: none; }
 .cloud-note { margin: 2px 0 0; color: #8f8da8; line-height: 1.5; }
+.cloud-conflict {
+    border: 1px solid rgba(255, 154, 154, .35); background: rgba(255, 154, 154, .08);
+    border-radius: 10px; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 13px;
+}
+.cloud-conflict p { margin: 0; }
 .cloud-msg { margin: 0; min-height: 18px; color: #7ee0a8; }
 .cloud-msg.cloud-error { color: #ff9a9a; }
+
+/* ===== 「关于网页版」页里的「数据状态」卡片（remote-data.js） ===== */
+.data-status-box { margin: 12px 0 6px; }
+.data-status { border-collapse: collapse; width: 100%; font-size: 13px; }
+.data-status th {
+    text-align: left; font-weight: 600; color: #a5a3bf; padding: 4px 12px 4px 0;
+    white-space: nowrap; vertical-align: top;
+}
+.data-status td { padding: 4px 0; color: #d8d6e8; line-height: 1.55; }
+.data-status th:empty { padding-right: 0; }
 
 /* ===== 「账号」页（cloud-ui.js）：登录/注册 + 账号区 + 结果 + 卡库同步 ===== */
 .cloud-panel-open { display: flex; flex-direction: column; gap: 12px; }

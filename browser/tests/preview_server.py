@@ -16,19 +16,33 @@ parser.add_argument("--port", type=int, default=8877)
 parser.add_argument("--prefix", default="/ournotes-planner/")
 # 默认只监听本机；传 --host 0.0.0.0 可以让同一局域网里的手机访问（例如直接下载取包工具的 APK）
 parser.add_argument("--host", default="127.0.0.1")
-# 同源 API 代理：把 --api-prefix 开头的请求转发到 --api-proxy（末尾不要带斜杠）
+# 同源 API 代理：把 --api-prefix 开头的请求转发到 --api-proxy（末尾不要带斜杠）。
+#   --api-prefix 可以给**多个**（逗号分隔），例如 "/api,/data" —— 正式站点的 nginx 就是这么配的。
+#   --api-strip 默认 true = 去掉前缀再加到上游 base 后面（对接真实服务器时常用，例如 /cloud-api → 上游根）；
+#               设成 false = 原样拼接（前缀本身就是真实路径时用，例如 /api、/data）。
 parser.add_argument("--api-proxy", default=None, help="例如 http://127.0.0.1:8901")
-parser.add_argument("--api-prefix", default="/cloud-api")
+parser.add_argument("--api-prefix", default="/cloud-api", help="逗号分隔，可多个：/api,/data")
+parser.add_argument("--api-strip", default="true", help="转发时是否去掉前缀（true/false）")
 args = parser.parse_args()
 directory = Path(__file__).resolve().parents[1] / "dist"
+API_PREFIXES = [item.strip() for item in args.api_prefix.split(",") if item.strip()]
+API_STRIP = args.api_strip.strip().lower() not in ("false", "0", "no")
+
+
+def matched_prefix(path):
+    for prefix in API_PREFIXES:
+        if path == prefix or path.startswith(prefix + "/"):
+            return prefix
+    return None
 
 
 class Handler(SimpleHTTPRequestHandler):
     extensions_map = {**SimpleHTTPRequestHandler.extensions_map, ".wasm": "application/wasm", ".mjs": "text/javascript", ".apk": "application/vnd.android.package-archive"}
 
-    def _proxy(self):
-        """把 /cloud-api/xxx 转发成 <api-proxy>/xxx，原样带回状态码、头与正文。"""
-        target = args.api_proxy.rstrip("/") + self.path[len(args.api_prefix):]
+    def _proxy(self, prefix):
+        """把 <prefix>/xxx 转发成 <api-proxy>/xxx（或原样，见 --api-strip），原样带回状态码、头与正文。"""
+        rest = self.path[len(prefix):] if API_STRIP else self.path
+        target = args.api_proxy.rstrip("/") + rest
         length = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(length) if length else None
         headers = {k: v for k, v in self.headers.items()
@@ -67,12 +81,13 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _route(self):
         path = self.path.split("?", 1)[0]
-        # ⚠️ 先判 API 代理：前端用的是 `/cloud-api/api/...` 这种**根路径**，
+        # ⚠️ 先判 API 代理：前端用的可能是**根路径**（`/api/...`、`/data/...`），
         #    不带 Pages 的 `/ournotes-planner/` 前缀，顺序反了就会被当成 404。
-        if args.api_proxy and (path == args.api_prefix or path.startswith(args.api_prefix + "/")):
+        prefix = matched_prefix(path) if args.api_proxy else None
+        if prefix:
             if self.command == "OPTIONS":
                 return self._proxy_preflight()
-            return self._proxy()
+            return self._proxy(prefix)
         if not path.startswith(args.prefix):
             return self.send_error(404)
         self.path = "/" + self.path[len(args.prefix):]
