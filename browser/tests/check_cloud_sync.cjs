@@ -97,9 +97,13 @@ const appState = page => page.evaluate(() => ({
 
 async function openApp(context, {apiBase = API_BASE, base = BASE} = {}) {
     const page = await context.newPage();
-    const bad = [], calls = [];
+    const bad = [], calls = [], net = [];
     page.on("response", r => {
         const url = r.url();
+        if (url.includes("/api/") || url.includes("/cloud-api/")) {
+            const method = r.request().method();
+            if (!url.includes("/api/internal/")) net.push({method, url, status: r.status()});
+        }
         if (r.status() >= 400 && !url.includes("/cloud-api/api/internal/")) bad.push(`${r.status()} ${url}`);
     });
     page.on("console", m => { if (m.type() === "error") bad.push("console: " + m.text().slice(0, 200)); });
@@ -112,7 +116,7 @@ async function openApp(context, {apiBase = API_BASE, base = BASE} = {}) {
     await page.goto(base, {waitUntil: "domcontentloaded"});
     await page.waitForFunction(() => window.PlannerAccount?.current?.(), null, {timeout: 180000});
     await page.waitForSelector("#cloudBadge", {timeout: 20000});
-    return {page, bad, calls};
+    return {page, bad, calls, net};
 }
 
 const gotoCloud = async page => {
@@ -429,6 +433,50 @@ const click = async (page, selector, settle = 700) => {
                 + ` | 请求：${c.calls.map(u => u.replace(`http://127.0.0.1:${sameOriginPort}`, "")).join(" ")}`
                 + ` | 4xx/5xx：${c.bad.slice(0, 3).join(" ; ")}`);
             check(sc.badge && sc.badge !== "登录", "头部标识同步", sc.badge);
+
+            // ---- ⑩b 同源空串下**必须**走通卡库同步（v0.3.0 的 bug 就藏在这里）----
+            // v0.3.0：profile-cloud 用 `!!apiBase()` 判断，空串是 falsy → canSync() 恒 false
+            // → 状态显示「未启用」、点上传一个请求都不发。这三条断言就是那个洞的补丁。
+            sc = await pageState(c.page);
+            check(/未同步/.test(sc.profileLine || ""), "同源下卡库状态是「未同步」（不是「未启用」）",
+                sc.profileLine);
+            const seededSameOrigin = await c.page.evaluate(async () => {
+                const bootstrap = await (await window.plannerFetch("/api/bootstrap")).json();
+                const document_ = window.PlannerProfile.document();
+                const memberId = bootstrap.catalog.members[0].id;
+                const snapId = bootstrap.catalog.snaps[0].id;
+                document_.name = "同源卡库";
+                document_.profile.inventory.members = [{id: memberId, level: 20, training_count: 0,
+                    awakening_count: 0, live_skill_level: 1, gekisou_skill_level: 1}];
+                document_.profile.inventory.snaps = [{id: snapId, level: 20, limit_break_count: 0}];
+                document_.candidate_member_ids = [memberId];
+                document_.candidate_snap_ids = [snapId];
+                return window.PlannerProfile.install(document_);
+            });
+            check(seededSameOrigin === true, "同源下也能改卡库（为自动推送做准备）");
+
+            c.net.length = 0;
+            await click(c.page, "#cloudProfilePush", 2000);
+            sc = await pageState(c.page);
+            const posted = c.net.find(r => r.method === "POST" && /\/api\/results$/.test(r.url));
+            check(!!posted && posted.status === 201,
+                "同源下点「立即上传卡库」真的发出 POST /api/results 201",
+                c.net.map(r => `${r.method} ${r.status} ${r.url.split("/api/")[1] || ""}`).join(" | ") || "(没有请求)");
+            check(/已同步/.test(sc.profileLine || ""), "上传后状态变「已同步」", sc.profileLine);
+
+            // 本地改动 → debounce 4 秒后**自动 PUT**（v0.3.0 也是整条不触发的）
+            c.net.length = 0;
+            await c.page.evaluate(() => {
+                const document_ = window.PlannerProfile.document();
+                document_.name = "同源卡库（改过）";
+                window.PlannerProfile.install(document_);
+            });
+            const putSeen = await (async () => {
+                await c.page.waitForTimeout(9000);           // debounce 4 秒 + 请求往返
+                return c.net.some(r => r.method === "PUT" && /\/api\/results\//.test(r.url));
+            })();
+            check(putSeen, "本地改动会自动 PUT 推上去（debounce 合并）",
+                c.net.map(r => `${r.method} ${r.status}`).join(" | ") || "(没有请求)");
             await ctxC.close();
         }
     } catch (error) {

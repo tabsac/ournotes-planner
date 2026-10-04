@@ -13,8 +13,8 @@
  *   * 上传前用 `cloud-api.js` 的 `preparePayload` 过滤敏感字段并提示。
  */
 import {
-    CloudError, apiBase, createResult, currentAccount, getResult, linkedResult, listResults,
-    preparePayload, setLinkedResult, token, updateResult,
+    CloudError, getResult, isConfigured, linkedResult, listResults,
+    preparePayload, saveLinkedResult, setLinkedResult, token,
 } from "./cloud-api.js";
 
 const PUSH_DEBOUNCE_MS = 4000;
@@ -63,7 +63,10 @@ function titleOf(document) {
 }
 
 function canSync() {
-    return !!apiBase() && !!token();
+    // ⚠️ **不要**写成 `!!apiBase()`：同源部署时 apiBase() 返回的是**空串**（不是 null），
+    //    空串在 JS 里是 falsy → 整个卡库同步会在同源形态下静默失效（v0.3.0 线上踩过，
+    //    服务器侧靠源码级 A/B 定死）。判断「有没有启用云端」一律走 isConfigured()。
+    return isConfigured() && !!token();
 }
 
 /**
@@ -73,7 +76,7 @@ function canSync() {
  */
 export function attachProfileCloud(nextHooks) {
     hooks = nextHooks;
-    if (!canSync()) { set(apiBase() ? "idle" : "off"); return; }
+    if (!canSync()) { set(isConfigured() ? "idle" : "off"); return; }
     set(linkedResult("profile") ? "synced" : "idle");
 }
 
@@ -100,7 +103,7 @@ export async function onAuthChanged(account) {
 
 /** 本地卡库保存后调用（来自 profile-storage 的钩子）：延迟合并推送。 */
 export function noteLocalSave() {
-    if (!canSync()) { set(apiBase() ? "idle" : "off"); return; }
+    if (!canSync()) { set(isConfigured() ? "idle" : "off"); return; }
     set("dirty", {detail: "有新改动待上传"});
     clearTimeout(timer);
     timer = setTimeout(() => { push().catch(() => {}); }, PUSH_DEBOUNCE_MS);
@@ -109,7 +112,9 @@ export function noteLocalSave() {
 /** 立刻推送（界面上的「立即同步」按钮也用它）。 */
 export async function push() {
     if (!hooks) throw new CloudError("no_hooks", "卡库同步还没接上");
-    if (!canSync()) throw new CloudError("unauthorized", "请先登录再同步卡库");
+    // 本地守卫用**自己的**错误码，别复用 unauthorized（那会让界面把「没登录」说成「登录已过期」）
+    if (!isConfigured()) throw new CloudError("not_configured", "这个站点没有启用云端功能");
+    if (!token()) throw new CloudError("not_logged_in", "请先登录再同步卡库");
     if (busy) return null;
     busy = true;
     clearTimeout(timer);
@@ -117,27 +122,16 @@ export async function push() {
     try {
         const document = hooks.getDocument();
         const prepared = preparePayload(document);
-        const linked = linkedResult("profile");
-        let result;
-        if (linked?.id) {
-            try {
-                result = await updateResult(linked.id, {payload: payloadOf(prepared.payload), version: linked.version});
-            } catch (error) {
-                if (error instanceof CloudError && error.status === 409) {
-                    set("conflict", {detail: "云端那条卡库被别的设备改过", error: error.message});
-                    return null;
-                }
-                throw error;
-            }
-            setLinkedResult({id: linked.id, version: result?.version ?? (linked.version + 1)}, "profile");
-        } else {
-            const created = await createResult({
-                title: titleOf(prepared.payload),
-                summary: summaryOf(prepared.payload),
-                payload: payloadOf(prepared.payload),
-            });
-            setLinkedResult({id: created.id, version: created.version ?? 1}, "profile");
-            result = created;
+        const body = {
+            title: titleOf(prepared.payload),
+            summary: summaryOf(prepared.payload),
+            payload: payloadOf(prepared.payload),
+        };
+        // 有关联就 PUT；关联没了（换过账号 / 别处删了 / 服务端 404）就清掉关联重新 POST
+        const result = await saveLinkedResult({which: "profile", ...body});
+        if (result?.conflict) {
+            set("conflict", {detail: "云端那条卡库被别的设备改过", error: result.error.message});
+            return null;
         }
         set("synced", {detail: prepared.notice || ""});
         return result;

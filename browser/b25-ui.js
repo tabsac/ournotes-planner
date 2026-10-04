@@ -272,21 +272,18 @@ export function mountB25(root) {
                 upload.disabled = true;
                 state.textContent = "正在上传…";
                 try {
-                    const linked = cloud.linkedResult("b25");
                     const body = {
                         title: `B25 成绩 · ${current.playerName || current.player?.name || "（未命名）"}`,
                         summary: `Rating ${current.stats?.rating_avg ?? "-"} · ${current.stats?.count ?? current.entries.length} 首`,
                         payload: current,
                     };
-                    if (linked?.id) {
-                        const updated = await cloud.updateResult(linked.id, {payload: current, version: linked.version});
-                        cloud.setLinkedResult({id: linked.id, version: updated?.version ?? (linked.version + 1)}, "b25");
-                        state.textContent = "已覆盖云端那条" + (updated.localNotice ? "（" + updated.localNotice + "）" : "");
-                    } else {
-                        const created = await cloud.createResult(body);
-                        cloud.setLinkedResult({id: created.id, version: created.version ?? 1}, "b25");
-                        state.textContent = "已存到云端" + (created.localNotice ? "（" + created.localNotice + "）" : "");
+                    const result = await cloud.saveLinkedResult({which: "b25", ...body});
+                    if (result?.conflict) {
+                        state.textContent = "另一端改过这条成绩卡，去账号页刷新后再存";
+                        return;
                     }
+                    cloud.setLinkedResult({...cloud.linkedResult("b25"), savedAt: current.savedAt}, "b25");
+                    state.textContent = (result?.localNotice || "已存到云端");
                 } catch (error) {
                     state.textContent = cloud.describeError(error);
                 } finally {

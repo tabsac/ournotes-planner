@@ -402,28 +402,24 @@ export function mountCloudPanel(root, options = {}) {
                 summary: summaryOf(record),
                 payload: record,
             };
-            const linked = cloud.linkedResult("b25");
-            let notice;
-            if (linked?.id) {
-                const updated = await cloud.updateResult(linked.id, {payload: body.payload, version: linked.version});
-                cloud.setLinkedResult({id: linked.id, version: updated?.version ?? (linked.version + 1), savedAt: record.savedAt}, "b25");
-                notice = updated.localNotice || updated.notice;
-                setMessage(joinNotice("已覆盖云端那条成绩卡", updated));
-            } else {
-                const created = await cloud.createResult(body);
-                cloud.setLinkedResult({id: created.id, version: created.version ?? 1, savedAt: record.savedAt}, "b25");
-                notice = created.localNotice || created.notice;
-                setMessage(joinNotice("成绩卡已存到云端", created));
+            // 有关联就 PUT；关联失效（换账号 / 被删）会自动清掉关联重新 POST
+            const result = await cloud.saveLinkedResult({which: "b25", ...body});
+            if (result?.conflict) {
+                throw new cloud.CloudError("conflict", "另一端改过这条成绩卡，先刷新列表再存");
             }
+            cloud.setLinkedResult({...cloud.linkedResult("b25"), savedAt: record.savedAt}, "b25");
+            setMessage(joinNotice("成绩卡已存到云端", result));
             await refreshList();
-            if (notice) setMessage(state.message + "；" + notice);
         });
     }
 
     function joinNotice(base, result) {
+        const parts = [base];
+        // 前端自己剔的（localNotice）和服务端再剔一遍（stripped）都要说出来
+        if (result?.localNotice) parts.push(result.localNotice);
         const stripped = result?.stripped?.length;
-        if (stripped) return `${base}；服务器剔除了 ${stripped} 项敏感字段（${result.stripped.slice(0, 2).join("、")}…）`;
-        return base;
+        if (stripped) parts.push(`服务器剔除了 ${stripped} 项敏感字段（${result.stripped.slice(0, 2).join("、")}…）`);
+        return parts.join("；");
     }
 
     function loadCard(id) {

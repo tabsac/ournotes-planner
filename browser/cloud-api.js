@@ -136,6 +136,11 @@ function notifyAuth() {
 function clearSession() {
     setToken(null);
     setAccount(null);
+    // ⚠️ 关联指针（本地这条数据 ↔ 云端哪一条）是**跟着账号**的：
+    //    清 token 时不清它，换个账号登录就会拿旧 id 去 PUT → 服务端按 owner 校验返回 404
+    //    → 界面「同步失败」而且没有重新关联的入口（v0.3.0 线上发现）。
+    setLinkedResult(null, "b25");
+    setLinkedResult(null, "profile");
 }
 
 /* ------------------------------------------------------------------ 请求 */
@@ -409,6 +414,31 @@ export function setLinkedResult(info, which = "b25") {
     write(which === "profile" ? PROFILE_RESULT_KEY : RESULT_KEY, info ? JSON.stringify(info) : null);
 }
 
+/**
+ * 上传一条「本机关联」的结果：有关联就 PUT，**关联失效（404）就清掉关联重新 POST**。
+ * 服务端按 owner 校验，换了账号后旧 id 一定 404 —— 以前只报「同步失败」，用户没有出路。
+ * 返回 `{conflict: true, error}` 表示版本冲突（交给界面提示），其它错误照抛。
+ */
+export async function saveLinkedResult({which = "b25", title, summary, payload, version} = {}) {
+    const linked = linkedResult(which);
+    if (linked?.id) {
+        try {
+            const updated = await updateResult(linked.id, {payload, version: version ?? linked.version});
+            setLinkedResult({...linked, id: linked.id, version: updated?.version ?? (linked.version + 1)}, which);
+            return updated;
+        } catch (error) {
+            if (error instanceof CloudError && error.status === 409) {
+                return {conflict: true, error};
+            }
+            if (!(error instanceof CloudError && error.status === 404)) throw error;
+            setLinkedResult(null, which);       // 关联没了 → 下面重新建一条
+        }
+    }
+    const created = await createResult({title, summary, payload});
+    setLinkedResult({id: created.id, version: created.version ?? 1}, which);
+    return created;
+}
+
 /* ------------------------------------------------------------ 只读数据接口 */
 
 export function dataVersion() {
@@ -421,6 +451,9 @@ export function describeError(error) {
     if (error instanceof CloudError) {
         const table = {
             not_configured: "这个站点没有启用云端功能，请访问官方站点 " + OFFICIAL_SITE,
+            // 「没登录」和「登录过期」是两回事：本地守卫抛 not_logged_in，unauthorized 只留给真 401
+            not_logged_in: error.message || "请先登录",
+            no_hooks: "卡库同步还没接上",
             unauthorized: error.message === "还没有登录" ? "请先登录" : "登录已过期，请重新登录",
             conflict: error.message,
             too_large: error.message,
