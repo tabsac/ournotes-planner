@@ -59,10 +59,11 @@ check(len(catalog) >= 87, "目录条数 = snapshot-override 的曲目数", len(c
 # 按 expert 等级挑：最高等级的歌**不放进榜单**，用来验证「不在榜也要上卡片」
 by_expert = sorted(usable, key=lambda m: (-catalog[m]["levels"]["expert"], m))
 top_song, low_song = by_expert[0], by_expert[-1]
-others = [m for m in usable if m not in (top_song, low_song)][:28]
-records_ids = [low_song, top_song] + others           # 30 首，低等级那首才在榜上
+others = [m for m in usable if m not in (top_song, low_song)][:32]
+records_ids = [low_song, top_song] + others           # 34 首，低等级那首才在榜上
 
-STATUS_CYCLE = (10, 20, 30, 20, 10, 30)
+# 状态循环：4/5 是 FC 或 AP，1/5 只有「完成」—— 后者按规则**不计入**
+STATUS_CYCLE = (20, 30, 20, 30, 10)
 
 
 def record(mid, index, diff="expert"):
@@ -96,7 +97,9 @@ stats = out["stats"]
 check(out["available"] is True, "成绩可用")
 check(len(out["entries"]) == 25, "取到 25 张卡（不是榜单的 1 张）", len(out["entries"]))
 check(stats["count"] == 25, "stats.count = 25", stats["count"])
-check(stats["total_songs"] == 30, "stats.total_songs = 30（有记录的歌数）", stats["total_songs"])
+check(stats["total_songs"] == 34, "stats.total_songs = 34（有记录的歌数）", stats["total_songs"])
+check(stats["fc_ap_songs"] == 28, "其中 28 首有 FC/AP（能进卡片）", stats["fc_ap_songs"])
+check(stats["cleared_only_songs"] == 6, "6 首只完成过，不计入", stats["cleared_only_songs"])
 check(stats["board_count"] == 1, "stats.board_count = 1（榜单条数）", stats["board_count"])
 check(stats["total_rating"] == 777, "HIGH SCORE RATING = 榜单之和", stats["total_rating"])
 
@@ -122,7 +125,11 @@ ok_value = all(
     and abs(e["value"] - float(e["level"])) < 1e-9
     and abs(e["counted"] - (e["value"] if e["ap"] else e["value"] - account_scores.FC_PENALTY)) < 1e-9
     for e in out["entries"])
-check(ok_value, "值 = 谱面等级；AP 记原值、其它减 1")
+check(ok_value, "值 = 谱面等级；AP 记原值、FC 记原值 − 1")
+check(all(e["status"] >= account_scores.STATUS_FC for e in out["entries"]),
+      "卡片上不可能出现「完成」档（status 全部 ≥ FC）",
+      sorted({e["status"] for e in out["entries"]}))
+check(all(e["fc"] is True for e in out["entries"]), "每张卡都至少是 FC")
 check(all(5 <= e["value"] <= 29 for e in out["entries"]),
       "值在谱面等级量纲上（5~29），不是分数派生的 rating",
       "%g ~ %g" % (stats["level_min"], stats["level_max"]))
@@ -139,10 +146,45 @@ player2 = json.loads(json.dumps(player))
 player2["_liveMusicResults"].append({"_mLiveMusicId": zero_song, "_highScore": 0,
                                      "_highScoreOnExpert": 0, "_expertClearedStatus": 0})
 out2 = account_scores.build_scores(player2, data)
-check(out2["stats"]["total_songs"] == 30, "没打过（全 0）的歌不算「有记录」",
+check(out2["stats"]["total_songs"] == 34, "没打过（全 0）的歌不算「有记录」",
       out2["stats"]["total_songs"])
 check(all(e["music_id"] != zero_song for e in out2["entries"]) or zero_song in records_ids,
       "没打过的歌不会凭空变成一张卡")
+
+print("\n[4b] 「完成」不计入：无论什么难度")
+only_cleared = {
+    "_name": "只完成君",
+    "_liveMusicResults": [
+        # 等级最高的那张谱面也只是「完成」—— 规则上不计入
+        {"_mLiveMusicId": by_expert[0], "_highScore": 990000, "_highScoreOnExpert": 990000,
+         "_expertClearedStatus": 10},
+    ],
+    "_topHighScoreRatings": [],
+}
+got_cleared = account_scores.build_scores(only_cleared, data)
+check(got_cleared["entries"] == [], "只完成过的歌不进卡片", len(got_cleared["entries"]))
+check(got_cleared["available"] is False, "没有可计入的歌 → available=False（走空状态引导）")
+check(any("FC" in n for n in got_cleared["notes"]), "空状态的提示说明「完成不计入」",
+      got_cleared["notes"][0] if got_cleared["notes"] else "(无)")
+
+mixed = {
+    "_name": "混合君",
+    "_liveMusicResults": [{
+        "_mLiveMusicId": by_expert[0],
+        "_highScore": 990000,
+        "_highScoreOnExpert": 990000, "_expertClearedStatus": 10,      # 高等级但只完成 → 不计入
+        "_highScoreOnHard": 800000, "_hardClearedStatus": 30,          # 低等级 AP → 计入
+    }],
+    "_topHighScoreRatings": [],
+}
+got_mixed = account_scores.build_scores(mixed, data)["entries"]
+check(len(got_mixed) == 1, "这首有一张 AP，所以还能进卡片", len(got_mixed))
+if got_mixed:
+    e = got_mixed[0]
+    check(e["difficulty"] == "hard" and e["ap"] is True,
+          "完成的那张 expert 被忽略，取 hard AP", "%s ap=%s" % (e["difficulty"], e["ap"]))
+    check(abs(e["counted"] - float(catalog[by_expert[0]]["levels"]["hard"])) < 1e-9,
+          "计入值 = hard 的谱面等级", e["counted"])
 
 print("\n[5] 排名只看难度计入值，不看分数")
 # 同一等级的兩首歌：id 大的那个分数更高。规则说排名不看分数，

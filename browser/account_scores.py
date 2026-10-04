@@ -50,7 +50,7 @@ DIFFICULTY_LABELS = {"easy": "EASY", "normal": "NORMAL", "hard": "HARD", "expert
 # 并把每首歌的原始 `ClearedStatus` 一起显示出来，方便一眼核对。
 # 如果实际刻度不同，只改这三个数就行。
 # ---------------------------------------------------------------------------
-STATUS_CLEARED = 10      # 完成（未 FC）
+STATUS_CLEARED = 10      # 完成（未 FC）—— 这个档位**不计入** B25 的评分
 STATUS_FC = 20           # FULL COMBO
 STATUS_AP = 30           # ALL PERFECT
 
@@ -75,14 +75,16 @@ STATUS_AP = 30           # ALL PERFECT
 #   同一个号昨天 46 首有记录，今天榜上只剩 19 首，截图对比明显少歌。
 #   游玩记录不会这样：打过就有记录，只增不减。
 #
-#   * 每首歌取它**打过的难度里计入值最高的那个**（同值取原值/更难的）；
+#   * **只有 FC / AP 的谱面计入**：「完成」（打过但没 FC）**无论什么难度都不计入**，
+#     所以一首歌至少要有一张 FC/AP 谱面才进卡片；只完成过的歌不进卡片（仍算「有记录」）；
+#   * 每首歌取它**打过的 FC/AP 难度里计入值最高的那个**（同值取原值/更难的）；
 #   * 按计入值从高到低取前 25 首，展示顺序也是这个顺序，第 1 名就是最值钱的那首；
-#   * **全程不看分数**：入榜和名次只由「AP 记原值、FC 及其它记原值 − 1」的难度值决定。
+#   * **全程不看分数**：入榜和名次只由「AP 记原值、FC 记原值 − 1」的难度值决定。
 #     分数（`_highScoreRating` = 分数 ÷ 1000 向下取整）只用来算游戏那个
 #     HIGH SCORE RATING 合计，和「哪 25 首进榜」无关。
 # ---------------------------------------------------------------------------
 
-# 参考图上的换算规则（用户给的）：AP 记原值，FC（及其它）记原值 - 1。
+# 参考图上的换算规则（用户给的）：AP 记原值、FC 记原值 − 1，**「完成」不计入**。
 FC_PENALTY = 1
 
 
@@ -233,7 +235,10 @@ def build_scores(player, data):
         total_rating += _int(row.get("_highScoreRating"), 0) or 0
 
     # ---- 卡片选谁：游玩记录（只增不减）里计入值最高的那些 ----
+    # 只有 **FC / AP** 的谱面计入：**「完成」（打过但没 FC）无论难度都不计入**，
+    # 所以一首歌必须至少有一张 FC/AP 的谱面才进卡片 —— 只完成过的歌不进（仍算「有记录」）。
     entries_all, played, missing_level, disagreements = [], set(), [], 0
+    cleared_only, fc_ap_songs = [], 0
     for mid, info in results.items():
         per_all = info.get("per") or {}
         scores = {diff: ((per_all.get(diff) or {}).get("score") or 0) for diff in DIFFICULTIES}
@@ -255,9 +260,14 @@ def build_scores(player, data):
             per = per_all.get(diff) or {}
             status = per.get("status", 0) or 0
             fc_reward = bool(per.get("fc_reward"))
+            # 旁证：领过 FC 奖励却没被判成 FC 档 —— 记一笔，界面上提示可能刻度不对
+            if fc_reward and status < STATUS_FC:
+                disagreements += 1
+            # 完成（没 FC）不计入 —— 无论难度
+            if status < STATUS_FC:
+                continue
 
             ap = status >= STATUS_AP
-            fc = ap or status >= STATUS_FC
             value = float(level)
             entry = {
                 "music_id": mid,
@@ -271,7 +281,7 @@ def build_scores(player, data):
                 "notes": (song.get("notes") or {}).get(diff),
                 "value": value,                       # 原值（AP 值）
                 "value_fc": max(0.0, value - FC_PENALTY),
-                # 计入 Rating 的值：AP 算原值，FC 及其它减 FC_PENALTY
+                # 计入 Rating 的值：AP 记原值，FC 记原值 − FC_PENALTY（只有这两档进得来）
                 "counted": value if ap else max(0.0, value - FC_PENALTY),
                 # 游戏自己算的 rating = 该难度分数 ÷ 1000 **向下取整**（榜单 19 条实测：
                 # round 有 13 条不符、floor 0 条不符）。只在界面上做参考，**不参与排名**。
@@ -279,7 +289,7 @@ def build_scores(player, data):
                 "high_score": score,
                 "status": status,
                 "fc_reward": fc_reward,
-                "fc": fc,
+                "fc": True,                           # 进得来的都至少是 FC
                 "ap": ap,
                 # 这首歌现在还在不在游戏那个榜上（纯参考，卡片不靠它选）
                 "in_board": mid in board_ids,
@@ -287,16 +297,19 @@ def build_scores(player, data):
             # 同一首歌打过多个难度：取计入值最高的；同值取原值（更难）高的。
             candidates.append(((entry["counted"], entry["value"]), entry))
         if not candidates:
-            # 有游玩记录，但快照里查不到这首歌（或这个难度）的谱面等级 —— 排不了序
-            missing_level.append(mid)
+            # 没有可计入的谱面，分两种情况（界面上给的提示不一样）：
+            #   ① 打过、但一张 FC/AP 都没有（只完成过）—— 规则上就是不计入；
+            #   ② 连这个难度的谱面等级都查不到 —— 数据快照的锅。
+            if any(isinstance(levels.get(d), (int, float)) and scores[d] for d in DIFFICULTIES):
+                cleared_only.append(mid)
+            else:
+                missing_level.append(mid)
             continue
+        fc_ap_songs += 1
         best = max(candidates, key=lambda item: item[0])[1]
-        # 旁证：领过 FC 奖励却没被判成 FC —— 记一笔，界面上提示可能刻度不对
-        if best["fc_reward"] and not best["fc"]:
-            disagreements += 1
         entries_all.append(best)
 
-    # 排序 / 选人：**只看「计入值」**（AP 记原值，FC 及其它记原值 − FC_PENALTY），
+    # 排序 / 选人：**只看「计入值」**（AP 记原值，FC 记原值 − FC_PENALTY），
     # **不看分数**。分数只影响游戏的 HIGH SCORE RATING（= 分数 ÷ 1000 那个榜），
     # 和「哪 25 首进榜」没有关系。
     # 关键：28 级 FC 的歌实际算 27，就该按 27 排在 28 级 AP 的歌**后面**。
@@ -307,9 +320,15 @@ def build_scores(player, data):
     entries = entries_all[:25]
 
     if not entries:
-        empty["notes"].append(
-            "账号包里没有 `_liveMusicResults`（游玩记录）：这个号还没打过歌，或者刚重置过。"
-            "先在游戏里打几首歌再重新取包。")
+        if played:
+            empty["notes"].append(
+                "这个号有 %d 首游玩记录，但一张 FC / AP 都没有（都只是「完成」）—— "
+                "B25 只统计 FC / AP，「完成」不论难度都不计入，所以卡片是空的。"
+                "把歌打到 FC 或 AP 再重新取包。" % len(played))
+        else:
+            empty["notes"].append(
+                "账号包里没有 _liveMusicResults（游玩记录）：这个号还没打过歌，或者刚重置过。"
+                "先在游戏里打几首歌再重新取包。")
         return empty
 
     levels = [e["value"] for e in entries]
@@ -320,18 +339,22 @@ def build_scores(player, data):
     # MasterLiveTotalHighScoreRating 门槛换算。
     stats = {
         "count": len(entries),
-        # Rating = 25 首「计入值」的平均（AP 记原值，FC 及其它 −FC_PENALTY）
+        # Rating = 卡片上这些歌「计入值」的平均（AP 记原值，FC 记原值 − FC_PENALTY）
         "rating_avg": round(sum(counted) / len(counted), 2) if counted else None,
         # 顺便给个不做任何减法的纯等级平均，方便对照
         "level_avg": round(sum(levels) / len(levels), 2) if levels else None,
         "level_min": min(levels) if levels else None,
         "level_max": max(levels) if levels else None,
+        # fc_count 含 AP（AP 也是 FC 的一种），界面上显示成「FC x / AP y」
         "fc_count": sum(1 for e in entries if e["fc"]),
         "ap_count": sum(1 for e in entries if e["ap"]),
         "status_values": sorted({e["status"] for e in entries}),
         "missing_level": len(missing_level),
         # 账号里「有游玩记录」的歌数 —— 界面上的「共 N 首有记录」写这个（只会增不会减）
         "total_songs": len(played),
+        # 其中有 FC/AP 谱面、能进卡片的歌数；以及只完成过（没有 FC/AP）所以不计入的歌数
+        "fc_ap_songs": fc_ap_songs,
+        "cleared_only_songs": len(cleared_only),
         # 游戏那个榜的条数（= 格子数）：和 total_songs 对比，一眼能看出榜在挤歌
         "board_count": len(board_ids),
         # 榜单里所有歌的评级之和 —— 游戏里显示的 HIGH SCORE RATING
@@ -388,7 +411,11 @@ def build_scores(player, data):
         "卡片只列这 %d 首，账号里一共 %d 首有记录。"
         % (len(entries), len(entries), len(played)))
     notes.append(
-        "排名只看「计入值」（AP 记原值、FC 及其它记原值 − 1），不看分数："
+        "只统计 FC / AP 的谱面：「完成」（打过但没 FC）无论什么难度都不计入，"
+        "所以只完成过的歌不会出现在卡片上（本号有 %d 首只完成过，没进卡片）。"
+        "计入值：AP 记谱面等级原值，FC 记原值 − 1。" % len(cleared_only))
+    notes.append(
+        "排名只看「计入值」（AP 记原值、FC 记原值 − 1），不看分数："
         "第 1 名是计入值最高的那首；计入值相同时按原值（更难的那张谱面）高的在前，"
         "再相同按乐曲 ID 排。")
     notes.append(
