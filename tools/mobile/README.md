@@ -69,6 +69,9 @@ python tools/mobile/make_mobile_evidence.py `
   --case solver-ap --case solver-mixed-rounding `
   --cancel-result result-after-cancel-solver-ap.json
 
+# 5b. 门禁诚实性小测（换了凭据就顺带跑一次；它从 package.json 读当前版本，别写死）
+python tools/mobile/check_evidence_gate.py
+
 # 6. 全量验收（会读到第 5 步的凭据）
 python -B tools/run_checks.py
 ```
