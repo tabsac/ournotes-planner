@@ -374,7 +374,7 @@ function drawMedal(ctx, medal, x, y) {
 /** 手绘 PNG：不引第三方库（网页是离线静态站，CSP 只允许 'self'）。 */
 export async function exportB25(record, extras) {
     const entries = record.entries;
-    const COLUMNS = 4;
+    const COLUMNS = 5;                 // 5 列：25 首正好排成 5×5（一屏一张，和游戏里那张卡一样）
     const PAD = 44, GAP = 18;
     // 卡高必须容得下：徽章行(38) + 封面(184) + 曲名(30) + 数值(28) + 脚注(20) + 下边距
     const CARD_W = 268, CARD_H = 348;
