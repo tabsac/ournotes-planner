@@ -230,8 +230,9 @@ export function mountB25(root) {
   <div class="b25-grid">${record.entries.map(cardHtml).join("")}</div>
   <p class="b25-note">每首歌显示的是<b>实际计入 Rating 的值</b>：AP 的歌直接显示谱面等级原值（<b>AP 记原值</b>），
      FC 及以下的歌显示「原值 → 计入值」（计入值 = 原值 − ${esc(String(record.fcPenalty))}）。
-     Rating = 这 ${record.stats?.count || record.entries.length} 首计入值的平均；排序按计入值从高到低（28 级的 FC 视为 27）。</p>
-     「最高分」和脚注里的「状态」是账号包里的原始数据，只作参考。</p>
+     Rating = 这 ${record.stats?.count || record.entries.length} 首计入值的平均。
+     选曲和名次<b>只看计入值、不看分数</b>：从账号包里打过并留下记录的乐曲（游玩记录只增不减）中
+     取计入值最高的 ${record.stats?.count || record.entries.length} 首，同值时原值高的在前，再同按乐曲 ID 排。</p>
   ${notes ? `<div class="notice"><b>关于 FC / AP 的可靠性</b><ul>${notes}</ul></div>` : ""}
   <div class="b25-actions">
     <button id="b25Download" type="button" class="primary">下载图片（PNG）</button>
@@ -622,12 +623,14 @@ export async function exportB25(record, extras) {
     ctx.font = "13px system-ui, 'Microsoft YaHei', sans-serif";
     const footY = height - FOOT + 22;
     ctx.fillText("前 = 谱面等级原值（AP 值）；后 = FC 及以下的值（原值 − " + (record.fcPenalty ?? 1) + "）。"
-        + "。Rating = 25 首按「AP 记原值、FC 及以下 −1」后的平均。"
-        + "　排序：按「计入值」从高到低（28 级 FC 视为 27）。", PAD, footY);
+        + "Rating = 卡片这 " + entries.length + " 首按「AP 记原值、FC 及以下 −1」后的平均。"
+        + "　排名只看计入值、不看分数。", PAD, footY);
+    ctx.fillText("选曲：账号包里游玩记录（打过就有、只增不减）中计入值最高的 25 首；"
+        + "同值时原值高的在前，再同按乐曲 ID 排。", PAD, footY + 22);
     ctx.fillStyle = "#6a6880";
     ctx.fillText("牌子档位来自 MasterLiveTotalHighScoreRating（银 105500 / 金 211000）。"
         + "FC / AP 依据账号包 ClearedStatus 推断，未经官方确认，仅供参考。　Our Notes 配队助手",
-        PAD, footY + 22);
+        PAD, footY + 44);
 
     const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
     if (!blob) throw new Error("浏览器没有生成 PNG");

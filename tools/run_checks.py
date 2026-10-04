@@ -50,7 +50,8 @@ def load_mobile_evidence(browser_version):
     return True, evidence
 
 
-for name in ("check_power_modes.py", "make_fixtures.py", "make_extra_fixtures.py", "make_judgement_fixture.py"):
+for name in ("check_power_modes.py", "make_fixtures.py", "make_extra_fixtures.py", "make_judgement_fixture.py",
+             "check_b25_selection.py"):
     run([sys.executable, "-B", str(ROOT / "browser/tests" / name), str(dest)])
 preview = subprocess.Popen([sys.executable, "-B", str(ROOT / "browser/tests/preview_server.py"), "--port", str(args.port)],
     cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -63,7 +64,8 @@ try:
         run(["node", str(ROOT / "browser/tests" / name), str(dest)])
     run([sys.executable, "-B", str(ROOT / "browser/tests/check_score_oracles.py"), str(dest)])
     reports = {name: json.loads((dest / f"{name}-report.json").read_text("utf-8"))
-               for name in ("browser", "lifecycle", "int64", "review", "images", "score-oracle", "power-modes")}
+               for name in ("browser", "lifecycle", "int64", "review", "images", "score-oracle", "power-modes",
+                            "b25-selection")}
     if not all(report["passed"] for report in reports.values()):
         raise RuntimeError("One or more checks failed")
     browser_version = json.loads((ROOT / "browser/package.json").read_text("utf-8"))["version"]
@@ -74,6 +76,7 @@ try:
                "review_checks": reports["review"]["reports"], "image_checks": reports["images"]["reports"],
                "int64": reports["int64"], "score_oracle": reports["score-oracle"],
                "power_modes": reports["power-modes"],
+               "b25_selection": reports["b25-selection"],
                "real_mobile_device_verified": mobile_verified,
                "real_mobile_device": mobile_detail}
     (dest / "validation-summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), "utf-8")
