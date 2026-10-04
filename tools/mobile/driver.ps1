@@ -258,6 +258,32 @@ try {
       continue
     }
 
+    # `tap <文本>`：在**当前屏幕**上按文本找节点并点它的中心（用 uiautomator 的 bounds，不猜坐标）。
+    # 用途：点掉只有原生层才有的东西 —— 最典型的是 X 浏览器的「文件下载」确认框（按钮「确定」）：
+    #   'tap 确定'
+    # 找不到该文本就**不点**（只记一行日志），绝不猜坐标。
+    if ($parts[0] -eq 'tap') {
+      $label = ($rest -join ' ')
+      Say "=== tap '$label' ==="
+      $tmp = Join-Path $OutDir '_ui_tap.xml'
+      A @('shell', 'rm -f /sdcard/_dsh_ui.xml') | Out-Null
+      A @('shell', 'uiautomator dump /sdcard/_dsh_ui.xml') | Out-Null
+      Run $Adb @('-s', $Serial, 'pull', '/sdcard/_dsh_ui.xml', $tmp) | Out-Null
+      if (-not (Test-Path $tmp)) { Say "  (uiautomator dump 没拿到，跳过)"; continue }
+      $xml = Get-Content -Raw -Encoding UTF8 $tmp
+      Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+      $node = [regex]::Match($xml, '<node[^>]*text="' + [regex]::Escape($label) + '"[^>]*>')
+      if (-not $node.Success) { Say "  没找到文本为 '$label' 的节点，不点"; continue }
+      $b = [regex]::Match($node.Value, 'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"')
+      if (-not $b.Success) { Say "  节点没有 bounds，不点"; continue }
+      $x = [int](([int]$b.Groups[1].Value + [int]$b.Groups[3].Value) / 2)
+      $y = [int](([int]$b.Groups[2].Value + [int]$b.Groups[4].Value) / 2)
+      Say "  tap at ($x,$y)"
+      A @('shell', "input tap $x $y") | Out-Null
+      Start-Sleep -Seconds 3
+      continue
+    }
+
     if (-not (Wait-Cdp $env:CDP_PORT 120)) { Say "FATAL: 跑 $step 之前 CDP 就不通"; $failed++; continue }
     # 只等 CDP 通就开跑。
     # ⚠️ 别再拿「手机侧 curl 取 index.html」当 reverse 隧道的健康探针：

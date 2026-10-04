@@ -2,23 +2,35 @@
 
 ## v0.1.3 — 2026-10-04
 
-- 放宽页面 CSP：`connect-src 'self'` → `connect-src 'self' blob:`。起因是真机上查到的一个**用户可见问题**：
-  手机自带浏览器（实测 X 浏览器）把「下载」挂在自己**注入页面**的脚本上
+两处**手机浏览器上用户可见**的问题：
+
+- **导出点了没有文件落地**。手机自带浏览器（实测 X 浏览器）把「下载」挂在自己**注入页面**的脚本上
   （`downloadBlobUrl: fetch(blob:...)` → FileReader → 原生 `window.mbrowser.getBase64FromBlobData`），
-  而页面 CSP 会拒掉那句 `fetch(blob:...)`（`Refused to connect to 'blob:...'` → `TypeError: Failed to fetch`），
-  于是点「导出本次结果」**没有任何文件落地**。真机取证（控制台、异常栈、`Debugger.getScriptSource`
-  抓出的注入脚本源码、设备侧 `/sdcard` 下无文件）见 `tools/mobile/README.md` 与设计笔记 2j①。
-- **修复后的状态要说清楚**：真机上复验到「CSP 那条拦截消失」（点导出 0 报错、0 异常，旧版必报）；
-  但**文件是否真的落盘尚未确认** —— 两次点击都落在 `visible=hidden` 的后台页面上，
-  而后台页面点导出浏览器根本不会走下载这条路（不报错也不落盘）。把「必须前台可见」写成硬前置之后，
-  云手机链路劣化到跑不完。**待补验**：设计笔记 2j⑥ 第 1 条有现成命令。
-- 手机端工具链加固（都是一跑就白跑一轮的坑）：共用 CDP 客户端 `app-client.js`、
-  选 target 按 reload 的 id 认回来（不再「谁 booted 用谁」）、**前台可见性硬校验**、
-  Service Worker 与缓存清理、`net::ERR_*` 整页重来、`MOBILE_CLEAR_STORAGE=1` 从零算、
-  日志降噪。详见 `tools/mobile/README.md`。
-- 桌面全量验收（`tools/run_checks.py`）在 v0.1.3 上通过：browser 8 / lifecycle 5 / review 3 /
-  images 2 + int64 + score-oracle + power-modes 全绿。真机凭据仍是 v0.1.2 的，门禁因此**如实报**
-  `real_mobile_device_verified=false`（重跑真机并重新生成凭据即可变回 true）。
+  而页面 CSP 的 `connect-src 'self'` 会拒掉那句 `fetch(blob:...)`
+  （`Refused to connect to 'blob:...'` → `TypeError: Failed to fetch`），下载根本走不到浏览器那一层。
+  现在 `connect-src` 允许 `blob:`。真机取证（控制台、异常栈、`Debugger.getScriptSource` 抓出的注入脚本源码）
+  见 `tools/mobile/README.md` 与设计笔记 2j①。
+  **真机复验（v0.1.3）**：点「导出卡库」（与「导出本次结果」走同一段 `download()`）→
+  浏览器弹出自己的「文件下载」确认框 → 点确定 → 文件真的落到 `/sdcard/Download/1635702473.json`
+  （1426 字节，内容是可解析的完整卡库 JSON）。同一个操作在 v0.1.2 上**连确认框都不出现**。
+  ⚠️ 两点浏览器自己的行为，不是应用的 bug：① 每次下载都要用户点一次「确定」；
+  ② 它会把文件名换掉（换成时间戳），所以别按 `OurNotes*` 去找文件。
+- **首次打开可能永远卡在「正在准备首次运行，页面会自动刷新一次…」**。启动流程里
+  `await navigator.serviceWorker.ready` **没有超时**：只要 Service Worker 是新装的（例如站点数据被清过、
+  或第一次访问），这一句在手机 WebView 上就可能永远不 resolve —— 页面永久卡住，没有报错也没有重试。
+  第 14 轮只给 `controllerchange` 加了上限，漏了 `ready`；现在同样加 5 秒上限，超时就当没有 Service Worker 继续
+  （求解不依赖跨源隔离）。**真机复验**：同一条此前永久冻住的页面，现在能继续走到「正在下载并准备计算组件」并正常启动。
+
+顺带：手机端验证工具链加固（共用 CDP 客户端、选 target 按 id 认回、前台可见性硬校验、
+`Service Worker` 只在明确要求时清、`net::ERR_*` 整页重来、`MOBILE_CLEAR_STORAGE=1` 从零算、日志降噪），
+详见 `tools/mobile/README.md`。
+
+桌面全量验收（`tools/run_checks.py`）在 v0.1.3 上通过：browser 8 / lifecycle 5 / review 3 /
+images 2 + int64 + score-oracle + power-modes 全绿。真机凭据仍是 v0.1.2 的，门禁因此**如实报**
+`real_mobile_device_verified=false`（补跑真机并重新生成凭据即可变回 true）。
+
+模型仍固定为公开源码 v0.2.5，数据快照 2026-10-01，计算范围没有变化。改动只涉及页面 CSP 与启动流程，
+不涉及公式、数据与搜索策略；旧计算结果无需重算。
 
 模型仍固定为公开源码 v0.2.5，数据快照 2026-10-01，计算范围没有变化。只改了页面 CSP，
 不涉及公式、数据与搜索策略；旧计算结果无需重算。

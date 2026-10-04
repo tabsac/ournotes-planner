@@ -183,8 +183,11 @@ python -B tools/run_checks.py
 15. **换了构建之后必须处理 Service Worker**：资源文件名带哈希，SW 缓存里的 `index.html`
     指向新哈希而它手上没有 → 每个资源都 `net::ERR_FAILED`，页面永远 boot 不出来，
     而 DOM 层毫无线索（`#loadError` / `#message` 全是空的）。
-    `reloadPage()` 现在会顺手 unregister SW + 清 Cache；`bootOnce` 见到 `net::ERR_*`
-    且 60 秒没 boot 就整页重来。
+    `bootOnce` 见到 `net::ERR_*` 且 60 秒没 boot 就整页重来。
+    ⚠️ **但别默认 unregister SW**（只在 `MOBILE_CLEAR_SW=1` 时清）：实测只要 worker 是新装的，
+    应用启动时那句 `await navigator.serviceWorker.ready` 就永远不 resolve，页面停死在
+    「正在准备首次运行，页面会自动刷新一次…」—— 看起来像链路卡死，其实是注册流程卡住
+    （v0.1.3 给 `ready` 补了 5 秒上限；默认不动 SW 仍然更稳）。
 16. **fixture 从哪读**：优先 `work/validation/`（验收流水线 `run_checks.py` 生成的那份），
     其次 `browser/work/fixtures/`；实际用的是哪份会打进日志。以前硬写后者，
     两边一旦不同（实测只差 `elapsed_seconds` 这类字段）手机会**对着过期 oracle 比对**且毫无提示。
@@ -192,4 +195,19 @@ python -B tools/run_checks.py
     把 CSP 报错和异常全埋掉。`app-client.js` 只滤它那几类固定噪音，应用自己的日志照旧。
 18. **链路差的时候别指望一轮跑完三个用例**：实测云手机对宿主的上行只有 ~130 KB/s
     （手机侧 `curl` 拉 `planner-runtime.zip`：20 秒只下 2.7 MB），而一次冷启动要下 ~40 MB。
-    这种时候要一个用例一轮，并且把「加载失败就整页重来」当常态。
+    这种时候要一个用例一轮，并且把「加载失败就整页重来」当常态。19. **「点了导出没反应」的最后一块拼图是浏览器自己的确认框**：v0.1.3 修掉 CSP 之后，点导出会弹出
+    X 浏览器自己的「文件下载 / 您确认要下载此文件么？/ [取消][复制链接][确定]」——
+    **必须点「确定」文件才会落盘**。`driver.ps1` 新增了 `tap <文本>` 步骤专门干这个：
+    ```powershell
+    & tools/mobile/driver.ps1 -Steps 'download_test.js solver-ap','tap 确定','adb shell ls -la /sdcard/Download/'
+    ```
+20. **别按应用给的文件名去找落盘的文件**：X 浏览器会**换掉文件名**（变成 `1635702473.json` 这种时间戳名）。
+    找文件用 `ls -la /sdcard/Download/` 或按 `*.json` 找，**不要** `find -name '*OurNotes*'`
+    （本轮前半程就被这条骗过一次，把「落盘了但名字变了」误判成「没落盘」）。
+21. **验证下载不需要卡库**：「导出卡库」`#export` 与「导出本次结果」`#exportResult` 走的是**同一段
+    `download()`**（`URL.createObjectURL` → `<a download>` → `a.click()`），所以拿前者就能验整条下载链路，
+    **不用先导入卡库、也不用跑一次搜索**。这是本轮把「导出落盘」验通的关键一步。
+22. **WebView devtools 挂掉时改用 UI 驱动**（`adb shell input tap` + `uiautomator dump` + `screencap`）：
+    原生控件（系统对话框、文件选择器）有无障碍树、能精确定位；**WebView 里的内容一个节点都不暴露**，
+    只能看截图按坐标点（坐标 = 截图像素 ÷ 屏幕尺寸）。首次启动/`pm clear` 之后会弹
+    「服务协议和隐私政策」（同意）与「防止诈骗提醒」（我已了解），用 `tap <文本>` 点掉即可。

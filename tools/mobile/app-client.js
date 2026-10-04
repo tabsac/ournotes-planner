@@ -459,14 +459,19 @@ class Session {
     const pinned = this.targetId;   // ⚠️ 记住 reload 的是哪一个 target：重连时按 id 认回来
     const flagKey = 'ournotes-isolation-reload:' + this.appPath;
     await this.act(`try { sessionStorage.setItem(${JSON.stringify(flagKey)}, '1'); } catch (e) {} 'ok'`).catch(() => {});
-    // 顺带把 Service Worker 与它的缓存清掉：换了构建之后，SW 里缓存的 index.html 会指向**新哈希**的
-    // 资源，而那些资源它手里没有 —— 结果是「外壳能出来、脚本一直 net::ERR_FAILED」，页面上永远 boot 不出来。
-    const cleaned = await this.act(`(async () => {
-      let sw = 0, cache = 0;
-      try { for (const r of await navigator.serviceWorker.getRegistrations()) { if (await r.unregister()) sw++; } } catch (e) {}
-      try { for (const k of await caches.keys()) { if (await caches.delete(k)) cache++; } } catch (e) {}
-      return {sw, cache}; })()`, true).catch(() => null);
-    if (cleaned && (cleaned.sw || cleaned.cache)) this.log(`  清掉 service worker ${cleaned.sw} 个 / 缓存 ${cleaned.cache} 个`);
+    // Service Worker / 缓存只在**明确要求**时清（`MOBILE_CLEAR_SW=1`）。
+    // ⚠️ 别默认清：实测把这台手机上的 SW unregister 掉之后，应用启动时那句
+    //    `await navigator.serviceWorker.ready` **永远不 resolve**，页面就永远停在
+    //    「正在准备首次运行，页面会自动刷新一次…」—— 看起来像链路卡死，其实是注册流程卡住。
+    //    （v0.1.3 给 `ready` 补了 5 秒上限；这里仍然默认不动 SW，免得把「首次安装」这条路当常态。）
+    if (process.env.MOBILE_CLEAR_SW) {
+      const cleaned = await this.act(`(async () => {
+        let sw = 0, cache = 0;
+        try { for (const r of await navigator.serviceWorker.getRegistrations()) { if (await r.unregister()) sw++; } } catch (e) {}
+        try { for (const k of await caches.keys()) { if (await caches.delete(k)) cache++; } } catch (e) {}
+        return {sw, cache}; })()`, true).catch(() => null);
+      if (cleaned) this.log(`  清掉 service worker ${cleaned.sw} 个 / 缓存 ${cleaned.cache} 个（MOBILE_CLEAR_SW=1）`);
+    }
     await this.cdp.send('Page.navigate', {url: this.appUrl}).catch(() => {});
     await sleep(800);
     this.live = true;

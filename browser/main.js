@@ -19,7 +19,15 @@ async function ensureIsolation() {
   }
   showLoading('正在准备首次运行，页面会自动刷新一次…');
   await navigator.serviceWorker.register(new URL('service-worker.js', baseURL), {scope});
-  await navigator.serviceWorker.ready;
+  // ⚠️ `ready` 也必须加上限：它等的是「这个 scope 下有 active 的 worker」，
+  //    而实测在手机 WebView 上，**只要 worker 是新装的（例如刚被 unregister 过），这一句就永远不 resolve**
+  //    —— 页面于是永远停在上面那句「正在准备首次运行，页面会自动刷新一次…」，没有任何报错、也没有重试。
+  //    第 14 轮只给 `controllerchange` 加了上限（见下），漏了这里。超时就当没有 Service Worker 继续，
+  //    理由与下面相同：求解已经不依赖跨源隔离，最坏只是少一层加速。
+  await Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise(resolve => setTimeout(resolve, 5000)),
+  ]);
   if (!navigator.serviceWorker.controller) {
     // 注册后本页不一定马上被接管。实测手机 WebView 上会一直等不到 controllerchange，
     // 页面就永远停在「正在准备首次运行」。加个上限：超时就当没有隔离继续，
