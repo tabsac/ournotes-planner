@@ -43,12 +43,14 @@ def verify(site):
     if any(p.stat().st_size >= 100 * 1024 * 1024 for p in files.values()):
         raise ValueError("A static file exceeds GitHub's individual file limit")
     html = (site / "index.html").read_text("utf-8")
-    # 私密红线：本地构建可以带自己的 API 地址（browser/api-config.local.json），
-    # 但**发布了就等于把服务器地址写进公开仓库**。这里拦住**绝对地址**；
-    # 空串 / 相对路径（同源部署，例如 on.tabsac.com 用 {"apiBase": ""}）不含任何地址，放行。
-    api_meta = re.search(r'<meta name="ournotes-api-base" content="([^"]*)"', html)
-    if api_meta and re.match(r"^https?://", api_meta.group(1)):
-        raise ValueError("Site embeds a private API endpoint; rebuild without browser/api-config.local.json")
+    # 私密红线 + 部署纪律：**要发布的站点不许带 api-base 标记**。
+    #   * 带绝对地址 → 等于把服务器地址写进公开仓库（红线）；
+    #   * 即使是空串（同源）：公开镜像站（GitHub Pages）上没有 `/api`，带上它只会让云端面板
+    #     去打必然 404 的同源接口，体验更糟。
+    # 所以：`docs/` 那份必须是**不带本地配置**构建的产物；带标记的那份只作为交付包给服务器。
+    if "ournotes-api-base" in html:
+        raise ValueError("Published site must be built WITHOUT browser/api-config.local.json "
+                         "(found an ournotes-api-base meta tag)")
     for relative in re.findall(r'(?:src|href)="(\./assets/[^\"]+)"', html):
         if not (site / relative).is_file():
             raise ValueError(f"Missing entry asset: {relative}")

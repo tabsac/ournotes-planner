@@ -156,7 +156,10 @@ def main():
     included = []
     overridden = []
     with zipfile.ZipFile(source) as archive, zipfile.ZipFile(payload, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as runtime:
-        html = archive.read(prefix + "web/index.html").decode("utf-8")
+        # 统一成 LF：上游包里的 html 是 CRLF，而 `write_text` 在 Windows 上会把 \n 再翻成 \r\n
+        # → 产物变成 `\r\r\n`（每行多一个 CR）。浏览器不在乎，但会让「两份产物逐字节对比」
+        # 看着像有差异，交付/验收时白白多核一遍。app.js 早就做过同样的归一化（下一行），html 漏了。
+        html = archive.read(prefix + "web/index.html").decode("utf-8").replace("\r\n", "\n")
         app = archive.read(prefix + "web/app.js").decode("utf-8").replace("\r\n", "\n")
         css = archive.read(prefix + "web/style.css")
         for info in archive.infolist():
@@ -297,7 +300,7 @@ def main():
         '<span id="cloudBadge" class="badge cloud-badge" role="button" tabindex="0">云端未启用</span>'
         '<div id="profileHint"')
 
-    (HERE / "index.html").write_text(html, "utf-8")
+    (HERE / "index.html").write_text(html, "utf-8", newline="\n")
     (HERE / "style.css").write_bytes(css + b"\n" + (HERE / "account.css").read_bytes())
     app = replace_once(app, 'const STORE = "ournotes-local-planner-v1-profile";', 'const STORE = "ournotes-browser-planner-v1-profile:" + window.Planner.scope;')
     # 深链接白名单：上游只列了自己那几页，账号页 / B25 页 / 账号页要补上，否则 #b25 打不开
