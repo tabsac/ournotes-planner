@@ -630,4 +630,4 @@ class Session {
 }
 
 module.exports = {REPO, OUT_DIR, PORT, APP_URL, STATE, PROBE, stamp, sleep,
-                  targetsOnce, wsCandidates, CDP, Session, valueOf};
+                  targetsOnce, wsCandidates, CDP, Session, valueOf, fixturePath};

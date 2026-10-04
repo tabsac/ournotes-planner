@@ -1,7 +1,7 @@
 {
   "schema": "ournotes-mobile-verification/1",
   "verified": true,
-  "checked_at": "2026-10-04T13:16:39+08:00",
+  "checked_at": "2026-10-04T17:22:56+08:00",
   "device": {
     "serial": "103.36.194.17:495",
     "model": "PCHM30",
@@ -18,16 +18,18 @@
     "navigator_locks": true
   },
   "app": {
-    "browser_version": "0.1.2",
+    "browser_version": "0.1.3",
     "core_version": "0.2.5"
   },
   "cases": [
     {
-      "name": "solver-ap",
-      "result_file": "result-solver-ap.json",
+      "name": "after-cancel:solver-ap",
+      "result_file": "result-after-cancel-solver-ap.json",
       "compare": "PASSED",
       "ok": true,
       "compare_output": [
+        "（比对对象：C:\\Users\\13766\\dsh-workspace\\ournotes-team-planner-web\\work\\mobile\\result-after-cancel-solver-ap.json）",
+        "  （oracle：C:\\Users\\13766\\dsh-workspace\\ournotes-team-planner-web\\work\\validation\\solver-ap.json）",
         "PASSED  solver-ap",
         "  algorithm          = adaptive_cp_sat_with_exact_score_oracle",
         "  optimality_proven  = true",
@@ -76,5 +78,5 @@
       }
     }
   ],
-  "notes": "云手机（无跨源隔离）上走应用自己的路径「导入 → 计算 → 导出」，与原生 oracle 逐条比对"
+  "notes": "云手机（无跨源隔离、无 SAB）上人工点击走应用自己的路径：导入卡库 → 计算 → 在「精确求解中…」阶段点取消（终态「计算已取消」、不出结果）→ 再计算一次 → 导出 → 与原生 oracle 逐条比对。导出文件由浏览器自身「文件下载」确认框确认后落盘 /sdcard/Download。"
 }

@@ -64,10 +64,22 @@ const samples = [];
       lastStageLog = Date.now();
       session.log(`  … ${state.title} || ${state.count}`);
     }
-    // 还没点取消就算完了：说明这个 fixture 在手机上一眨眼就跑完，本用例验不了取消
-    if (state.done || (!state.busy && !/取消/.test(state.title))) {
-      throw new Error(`还没点取消，这次计算就已经结束（title=${JSON.stringify(state.title)}）` +
-        ` —— 说明本用例需要更长的搜索，换 fixture 或改小 CANCEL_STAGE_MS`);
+    // 点了「计算」却没进入运行态 —— 别把它误读成「算完了」。最常见的原因是
+    // **同一个网址还开着另一个标签页**：应用的「多标签互斥」会把本页标成卡库已过期
+    // （`profileStore.outOfDate`），于是 `calculate()` 一进门就 return，什么都不会发生。
+    // 实测就撞上过：手机上残留了 2 个 app page target，取消用例在 1 秒内就「结束」了。
+    if (!state.busy && !state.done) {
+      const diag = await session.read(`({notice: (document.getElementById('message')?.textContent || '').trim(),
+        buttons: ['demo','new','import'].map(id => id + '=' + (document.getElementById(id)?.disabled ?? 'n/a')).join(','),
+        inputsDisabled: document.getElementById('inputArea')?.disabled ?? null,
+        visible: document.visibilityState, href: location.href})`).catch((e) => ({diagError: e.message}));
+      throw new Error(`点了「计算」但应用没有进入运行状态（title=${JSON.stringify(state.title)}）。`
+        + `最常见原因：同一个网址还有**另一个标签页** → 应用把本页标成「卡库已过期」，calculate() 直接返回。`
+        + `用 driver.ps1 -Reopen 从干净浏览器开始。诊断：${JSON.stringify(diag)}`);
+    }
+    if (state.done) {
+      throw new Error(`还没点取消就已经出结果了（title=${JSON.stringify(state.title)}）`
+        + ` —— 这个 fixture 在这台手机上跑得太快，取消无从验起；换更长的用例或减小 CANCEL_STAGE_MS`);
     }
     if (SOLVE_STAGE.test(state.title)) { entered = state; break; }
   }
