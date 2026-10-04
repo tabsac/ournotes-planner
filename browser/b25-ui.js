@@ -7,6 +7,7 @@
  *
  * 换算规则：AP 算原值，FULL COMBO 算原值 − fcPenalty，最后取平均。
  */
+import {mountCloudPanel} from "./cloud-ui.js";
 
 const STORE_KEY = "ournotes-b25-v1";
 const EVENT = "ournotes-b25-updated";
@@ -129,6 +130,23 @@ export function loadScores() {
     }
 }
 
+/**
+ * 直接装一份**完整的 record**（云端取回来的就是这种形状）。
+ * 和 saveScores 的区别：saveScores 收的是 Python 侧的成绩对象、还要 meta；
+ * 这里收的是已经存过档的 record，原样落地（只补 savedAt）。
+ */
+export function saveRecord(record) {
+    if (!record || !Array.isArray(record.entries) || !record.entries.length) return null;
+    const next = {...record, savedAt: record.savedAt || new Date().toISOString()};
+    try {
+        localStorage.setItem(key(), JSON.stringify(next));
+    } catch (error) {
+        console.warn("B25 成绩无法写入本地存储：", error);
+    }
+    window.dispatchEvent(new CustomEvent(EVENT, {detail: next}));
+    return next;
+}
+
 export function clearScores() {
     try { localStorage.removeItem(key()); } catch { /* 忽略 */ }
     window.dispatchEvent(new CustomEvent(EVENT, {detail: null}));
@@ -182,6 +200,8 @@ function emptyHtml() {
 
 export function mountB25(root) {
     if (!root) return;
+    // 云端面板在「取回」之后会被整块重建，用它把提示语带过去
+    let cloudFlash = "";
 
     function headerHtml(record, extras) {
         const stats = record.stats || {};
@@ -219,9 +239,40 @@ export function mountB25(root) {
     </div>
   </div>`;
     }
+    /**
+     * 挂云端面板。**空状态也要挂** —— 换设备的人第一眼就是空的，
+     * 得能在那儿登录、把云端那张卡取回来。
+     */
+    function mountCloud(extras) {
+        const host = root.querySelector("#cloudPanel");
+        if (!host) return;
+        const flash = cloudFlash;
+        cloudFlash = "";
+        try {
+            mountCloudPanel(host, {
+                initialMessage: flash,
+                getRecord: () => loadScores(),
+                // 取回后卡片要整块重画（云端面板也会被重建），提示语得跟着带过去。
+                // ⚠️ 这里**不要**自己再 render 一次：saveRecord 已经派发 EVENT → render，
+                //    多画一次会把刚带过去的提示语吃掉（第二次挂载时 flash 已消费）。
+                onRecordLoaded: (payload, note) => {
+                    cloudFlash = note || "";
+                    saveRecord(payload);
+                },
+            });
+        } catch (error) {
+            console.warn("云端面板挂载失败（不影响本地卡片）：", error);
+        }
+    }
+
     function render(extras) {
         const record = loadScores();
-        if (!record) { root.innerHTML = emptyHtml(); bindGoto(); return; }
+        if (!record) {
+            root.innerHTML = emptyHtml() + '<div id="cloudPanel"></div>';
+            bindGoto();
+            mountCloud(extras);
+            return;
+        }
 
         const notes = (record.notes || []).map(n => `<li>${esc(n)}</li>`).join("");
         root.innerHTML = `
@@ -240,6 +291,7 @@ export function mountB25(root) {
     <button id="b25Clear" type="button">清除成绩</button>
     <span id="b25State" class="b25-dl-state"></span>
   </div>
+  <div id="cloudPanel"></div>
 </div>`;
 
         root.querySelectorAll("img[data-fallback]").forEach(img => {
@@ -250,6 +302,9 @@ export function mountB25(root) {
                 }
             });
         });
+
+        // 云端同步（可选）：没配服务器地址时它一个请求都不发
+        mountCloud(extras);
 
         const state = root.querySelector("#b25State");
         root.querySelector("#b25Download").addEventListener("click", (event) => {

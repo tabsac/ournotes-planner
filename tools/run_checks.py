@@ -60,7 +60,8 @@ try:
     if not line.startswith("Static preview:"):
         raise RuntimeError("Static preview did not start: " + preview.stderr.read())
     print(line.strip(), flush=True)
-    for name in ("check_browser.cjs", "check_lifecycle.cjs", "check_int64.cjs", "check_review.cjs", "check_images.cjs"):
+    for name in ("check_browser.cjs", "check_lifecycle.cjs", "check_int64.cjs", "check_review.cjs",
+                 "check_images.cjs", "check_cloud_sync.cjs"):
         run(["node", str(ROOT / "browser/tests" / name), str(dest)])
     run([sys.executable, "-B", str(ROOT / "browser/tests/check_score_oracles.py"), str(dest)])
     reports = {name: json.loads((dest / f"{name}-report.json").read_text("utf-8"))

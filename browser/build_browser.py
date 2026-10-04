@@ -25,6 +25,62 @@ def replace_once(text, old, new):
     return text.replace(old, new)
 
 
+# ---------------------------------------------------------------------------
+# 云端（服务器）配置 —— **可选、且只在本机构建时生效**
+#
+# 私密约束（服务器对接说明 §6）：**服务器地址绝不能进公开仓库，也不能进前端源码**。
+# 所以这里读的是一个**被 .gitignore 忽略**的本机文件 `browser/api-config.local.json`：
+#
+#     {"apiBase": ""}                       ← 与网页同源（服务器自己托管网页时用这个）
+#     {"apiBase": "https://api.xxxx.com"}   ← 跨源，会把源站加进 connect-src
+#
+# 没有这个文件（CI / 公开仓库 / GitHub Pages 的构建）时**什么都不做**：
+# 页面照旧只有 `connect-src 'self' blob:`，云端功能在界面上显示「未配置」并且**一个请求都不发**。
+# 另外 `tools/verify_release.py` 会拦住「把带地址的 index.html 发布出去」→ 见那里的
+# `ournotes-api-base` 检查。
+# ---------------------------------------------------------------------------
+CLOUD_CONFIG = HERE / "api-config.local.json"
+
+
+def cloud_api_base():
+    """返回本机配置的 API base（None = 没配置）。值不合法就直接报错，别悄悄降级。"""
+    if not CLOUD_CONFIG.is_file():
+        return None
+    try:
+        # utf-8-sig：本机 PowerShell 的 Set-Content -Encoding UTF8 会写 BOM，别被它绊倒
+        raw = json.loads(CLOUD_CONFIG.read_text("utf-8-sig"))
+    except ValueError as error:
+        raise SystemExit(f"{CLOUD_CONFIG.name} 不是合法 JSON：{error}")
+    if not isinstance(raw, dict) or not isinstance(raw.get("apiBase"), str):
+        raise SystemExit(f'{CLOUD_CONFIG.name} 需要形如 {{"apiBase": "https://…"}}')
+    base = raw["apiBase"].strip().rstrip("/")
+    # 只允许「空（同源）」/「/相对路径」/「http(s) 绝对地址」——这个值要进 HTML 属性，别让引号进来
+    if base and not (base.startswith("/") or base.startswith("http://") or base.startswith("https://")):
+        raise SystemExit(f"apiBase 只接受空值、/开头相对路径或 http(s) 绝对地址，收到：{base!r}")
+    if any(ch in base for ch in '"\'<> \\\n\r\t'):
+        raise SystemExit(f"apiBase 里有非法字符：{base!r}")
+    return base
+
+
+def inject_cloud_config(html):
+    """把本机的 API base 写进页面：一个 <meta>（运行时读）+ CSP 的 connect-src（跨源时才加）。"""
+    base = cloud_api_base()
+    if base is None:
+        return html
+    if base.startswith("http"):
+        # CSP 是按**源**放行的（connect-src 允许 https://host:port 就行）
+        match = re.match(r"^(https?://[^/]+)", base)
+        if not match:
+            raise SystemExit(f"apiBase 无法解析出源：{base!r}")
+        html = replace_once(html, "connect-src 'self' blob:;",
+                            f"connect-src 'self' blob: {match.group(1)};")
+    # ⚠️ 不能注入 <script>：本页 CSP 的 script-src 是 'self'，内联脚本会被拒。
+    #    用 <meta> 传值，前端 document.querySelector 读它。
+    html = replace_once(html, "<head>", f'<head><meta name="ournotes-api-base" content="{base}">')
+    print(f"cloud api base injected: {base or '(same origin)'}", flush=True)
+    return html
+
+
 def add_runtime(archive, name, raw):
     entry = zipfile.ZipInfo(name, date_time=(2026, 10, 1, 0, 0, 0))
     entry.compress_type = zipfile.ZIP_DEFLATED
@@ -194,6 +250,7 @@ def main():
     #    紧接着 `TypeError: Failed to fetch`，表现为**点了「导出本次结果」没有任何文件落地**。
     #    真机取证与复现步骤见 tools/mobile/README.md 与设计笔记 2j④。
     html = replace_once(html, '<head>', '<head><meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\' \'unsafe-eval\'; worker-src \'self\' blob:; img-src \'self\' data:; connect-src \'self\' blob:; object-src \'none\'; base-uri \'self\';">')
+    html = inject_cloud_config(html)
     html = replace_once(html, '<title>', '<link rel="icon" href="./favicon.svg"><title>')
     (PUBLIC / "favicon.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="16" fill="#7667de"/><path d="M32 8 38 26 56 32 38 38 32 56 26 38 8 32 26 26Z" fill="white"/></svg>', "utf-8")
     html = html.replace("OUR NOTES / LOCAL PLANNER", "OUR NOTES / BROWSER PLANNER").replace("本地运行", "浏览器计算")

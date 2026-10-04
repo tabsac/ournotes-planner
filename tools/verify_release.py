@@ -43,6 +43,10 @@ def verify(site):
     if any(p.stat().st_size >= 100 * 1024 * 1024 for p in files.values()):
         raise ValueError("A static file exceeds GitHub's individual file limit")
     html = (site / "index.html").read_text("utf-8")
+    # 私密红线：本地构建可以带自己的 API 地址（browser/api-config.local.json），
+    # 但**发布了就等于把服务器地址写进公开仓库**。这里直接拦住。
+    if "ournotes-api-base" in html:
+        raise ValueError("Site embeds a private API endpoint; rebuild without browser/api-config.local.json")
     for relative in re.findall(r'(?:src|href)="(\./assets/[^\"]+)"', html):
         if not (site / relative).is_file():
             raise ValueError(f"Missing entry asset: {relative}")

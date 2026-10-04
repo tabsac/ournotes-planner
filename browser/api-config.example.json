@@ -1,0 +1,5 @@
+{
+  "_说明": "把这个文件复制成 browser/api-config.local.json（已被 .gitignore 忽略）来开启云端功能。绝不要把真实地址提交进仓库。",
+  "_apiBase": "留空字符串 = 与网页同源（服务器自己托管网页时用这个，CSP 只需 'self'，没有 CORS）；也可以填绝对地址，例如 https://api.example.com 或 http://127.0.0.1:8901",
+  "apiBase": ""
+}

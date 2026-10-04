@@ -561,3 +561,38 @@ a.button-link:hover {
 #b25Root .b25-title-row .b25-title { flex: 1 1 auto; min-width: 0; }
 #b25Root .b25-title-row .b25-badge { flex: none; font-size: 15.75px; padding: 3px 10.5px; border-radius: 12px; }
 #b25Root .b25-values { display: block; }
+
+/* ===== 云端同步面板（可选功能；没配服务器地址时只显示状态，不发请求） ===== */
+.cloud-panel {
+    margin-top: 14px; border: 1px solid rgba(255, 255, 255, .09); border-radius: 12px;
+    background: rgba(255, 255, 255, .03); padding: 10px 14px; font-size: 13px;
+}
+.cloud-panel > summary { cursor: pointer; color: #b9b6d4; font-weight: 600; }
+.cloud-state { margin-left: 10px; font-weight: 400; color: #8f8da8; }
+.cloud-body { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.cloud-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cloud-label { color: #a5a3bf; flex: none; }
+.cloud-dim { color: #7c7a95; }
+.cloud-input {
+    flex: 1 1 240px; min-width: 160px; padding: 5px 9px; border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, .14); background: rgba(0, 0, 0, .25); color: inherit;
+}
+.cloud-input-code { flex: 0 1 140px; letter-spacing: 3px; text-align: center; }
+.cloud-panel button {
+    padding: 5px 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .16);
+    background: rgba(255, 255, 255, .06); color: inherit; cursor: pointer;
+}
+.cloud-panel button:disabled { opacity: .45; cursor: default; }
+.cloud-panel button.primary { background: rgba(118, 103, 222, .35); border-color: rgba(118, 103, 222, .5); }
+.cloud-items { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cloud-item {
+    display: flex; align-items: center; gap: 10px; justify-content: space-between;
+    padding: 7px 10px; border-radius: 9px; background: rgba(255, 255, 255, .04);
+}
+.cloud-item-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cloud-item-main b { font-weight: 600; }
+.cloud-item-sum { color: #8f8da8; }
+.cloud-item-actions { display: flex; gap: 6px; flex: none; }
+.cloud-note { margin: 2px 0 0; color: #8f8da8; line-height: 1.5; }
+.cloud-msg { margin: 0; min-height: 18px; color: #7ee0a8; }
+.cloud-msg.cloud-error { color: #ff9a9a; }
