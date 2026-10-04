@@ -1,9 +1,9 @@
 {
   "schema": "ournotes-mobile-verification/1",
   "verified": true,
-  "checked_at": "2026-10-04T17:22:56+08:00",
+  "checked_at": "2026-10-05T03:24:09+08:00",
   "device": {
-    "serial": "103.36.194.17:495",
+    "serial": "103.36.204.38:499",
     "model": "PCHM30",
     "android": "11",
     "sdk": 30
@@ -18,10 +18,65 @@
     "navigator_locks": true
   },
   "app": {
-    "browser_version": "0.1.3",
+    "browser_version": "0.3.2",
     "core_version": "0.2.5"
   },
   "cases": [
+    {
+      "name": "solver-mixed-rounding",
+      "result_file": "result-solver-mixed-rounding.json",
+      "compare": "PASSED",
+      "ok": true,
+      "compare_output": [
+        "（比对对象：C:\\Users\\13766\\dsh-workspace\\ournotes-team-planner-web\\work\\mobile\\result-solver-mixed-rounding.json）",
+        "  （oracle：C:\\Users\\13766\\dsh-workspace\\ournotes-team-planner-web\\work\\validation\\solver-mixed-rounding.json）",
+        "PASSED  solver-mixed-rounding",
+        "  algorithm          = adaptive_cp_sat_with_exact_score_oracle",
+        "  optimality_proven  = true",
+        "  complete           = true",
+        "  event_pt  = event_pt 10200 / shop_pt 14630 / cp 剩余 119 / power 233983/299601",
+        "  shop_pt   = event_pt 10200 / shop_pt 14630 / cp 剩余 119 / power 233983/299601"
+      ],
+      "algorithm": "adaptive_cp_sat_with_exact_score_oracle",
+      "optimality_proven": true,
+      "complete": true,
+      "totals": {
+        "event_pt": {
+          "normal_plays": 4,
+          "challenge_plays": 2,
+          "boost_budget": 17,
+          "boost_spent": 16,
+          "boost_remaining": 1,
+          "starting_cp": 199,
+          "cp_gained": 320,
+          "cp_spent": 400,
+          "cp_remaining": 119,
+          "event_pt": 10200,
+          "shop_pt": 14630,
+          "ordinary_event_pt": 3400,
+          "ordinary_shop_pt": 4560,
+          "challenge_event_pt": 6800,
+          "challenge_shop_pt": 10070
+        },
+        "shop_pt": {
+          "normal_plays": 4,
+          "challenge_plays": 2,
+          "boost_budget": 17,
+          "boost_spent": 16,
+          "boost_remaining": 1,
+          "starting_cp": 199,
+          "cp_gained": 320,
+          "cp_spent": 400,
+          "cp_remaining": 119,
+          "event_pt": 10200,
+          "shop_pt": 14630,
+          "ordinary_event_pt": 3400,
+          "ordinary_shop_pt": 4560,
+          "challenge_event_pt": 6800,
+          "challenge_shop_pt": 10070
+        }
+      }
+    },
     {
       "name": "after-cancel:solver-ap",
       "result_file": "result-after-cancel-solver-ap.json",
@@ -78,5 +133,5 @@
       }
     }
   ],
-  "notes": "云手机（无跨源隔离、无 SAB）上人工点击走应用自己的路径：导入卡库 → 计算 → 在「精确求解中…」阶段点取消（终态「计算已取消」、不出结果）→ 再计算一次 → 导出 → 与原生 oracle 逐条比对。导出文件由浏览器自身「文件下载」确认框确认后落盘 /sdcard/Download。"
+  "notes": "云手机 PCHM30（Android 11 / WebView 124 / X 浏览器）上走应用自己的路径：无跨源隔离（server.py 不发 COOP/COEP，crossOriginIsolated=false、无 SharedArrayBuffer）→ 清空存储从零算 → 导入卡库 → 计算 → 取消 → 重跑 → 与原生 oracle 逐条比对。构建 0.3.2（2026-10-05）。"
 }

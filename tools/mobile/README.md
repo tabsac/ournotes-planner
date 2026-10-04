@@ -211,3 +211,26 @@ python -B tools/run_checks.py
     原生控件（系统对话框、文件选择器）有无障碍树、能精确定位；**WebView 里的内容一个节点都不暴露**，
     只能看截图按坐标点（坐标 = 截图像素 ÷ 屏幕尺寸）。首次启动/`pm clear` 之后会弹
     「服务协议和隐私政策」（同意）与「防止诈骗提醒」（我已了解），用 `tap <文本>` 点掉即可。
+23. **不清存储的那一次可能把页面卡在「正在加载…」，而且 CDP 连上不答**（0.3.2 复验时观察到一次）：
+    现象是 `watch.js` / `download_test.js` 一直报 `CDP Runtime.enable 超时 30000ms` 并循环，
+    而同时：
+
+    * 渲染进程**活着**（`ps -A` 里有 `com.google.android.webview:sandboxed_process0…`，状态 `do_epoll_wait`）；
+    * 系统 CPU 几乎全空闲（`top -n 1 -b` 里 396%/400% idle）—— 不是在算；
+    * `logcat -b events` 里**没有** `am_crash` / `am_anr`；
+    * 屏幕上**没有弹窗**，页面停在「正在加载… / 正在核对游戏数据与公式…」。
+
+    `am force-stop com.mmbox.xbrowser` 之后**带上 `MOBILE_CLEAR_STORAGE=1` 重跑就正常**（同一台机器同一次会话里，
+    前后两次带清存储的用例都 40 秒左右 boot 成功）。
+    ⚠️ 只记「观察到一次、原因未定性」——**别拿它当结论**；它和第 1 条的反诈弹窗表现很像，
+    先看屏幕有没有模态框。另外 `-Reopen` 之后首次还会弹**「服务协议和隐私政策」**（拒绝/同意），
+    `driver.ps1` 只自动点掉「我已了解」「不再提醒」这两类，这个得自己 `tap 同意`（或 force-stop 重来）。
+24. **`/json` 通不代表 WS 通，反过来也一样**：`driver.ps1` 一被 Ctrl-C/被杀，它持有的
+    `adb forward tcp:9222` 与 `reverse tcp:8899` 会立刻消失（watchdog 也随进程没了），于是
+    `cdp.js dump` 报 `ws error: unknown`、`/json` 直接连不上 —— 这**不是**页面坏了。
+    手动补回来即可（**只加不删，别 `--remove-all`**，见第 3 条）：
+    ```powershell
+    adb -s <serial> forward tcp:9222 localabstract:webview_devtools_remote_<pid>
+    adb -s <serial> reverse tcp:8899 tcp:8899
+    ```
+    `webview_devtools_remote_<pid>` 里的 `<pid>` 就是 `pidof com.mmbox.xbrowser` 的输出。
