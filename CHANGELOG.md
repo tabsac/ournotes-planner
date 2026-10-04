@@ -36,6 +36,16 @@
 桌面全量验收 0.3.2 `passed=true`；`verify_release.py` 通过；`docs/` 与 `browser/dist` 逐字节一致。
 交付包 `ournotes-web-0.3.2.tar.gz`（381 个文件 + `DELIVERY.md`，两份副本 sha256 相同）。
 
+**上线与真站点验收（服务器侧，2026-10-05）**：已覆盖部署到 `on.tabsac.com`（nginx 一行未改，
+备份 `ournotes-web.prev-0.3.1-2026-10-05-0243`），sha256 双方一致，入口 `assets/index-*.js`、
+新模块 `remote-data-*.js` 200；v0.3.1 的修复仍在产物里（`profile-cloud-*.js` 只有 token 一处 `!!`）。
+服务器侧**真的重建了一次线上数据**做两轮对照，正好验证了「变更看 `contentDigests`、
+字节看 `fileDigests`」这个分家口径：重建后 `updatedAt` 与三个文件的 `fileDigests` 都变了，
+`contentDigests` 不变 → 卡片报「与上次相同」、字节校验仍通过，**若拿 `fileDigests` 判断变更这里会永远误报**。
+关联指针 11 项全绿（改密后指针不动、重登走 PUT 同一条、云端列表只有 1 条、显式登出清空）。
+线上远端与内置快照当前完全一致，所以「不一致提醒」那条分支真站点上打不到 —— 待用临时改一首
+`display` 的方式专门验一次（见交接提示词）。
+
 模型仍固定为公开源码 v0.2.5、数据快照 2026-10-01，计算范围没有变化。
 
 ## v0.3.1 — 2026-10-05

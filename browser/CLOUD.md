@@ -88,6 +88,15 @@ python -B browser/tests/preview_server.py --port 8877 --api-proxy https://on.tab
 
 1. ~~消费 `/data/*.json`~~ **✅ v0.3.2 做了「核对 + 陈旧提醒」这一层**（`browser/remote-data.js`：
    字节校验 `fileDigests`、变更判断 `contentDigests`、与内置快照逐首比对、顶部提醒）。
+   真站点（2026-10-05）已按这个口径验过：服务器侧**真的重建了一次数据**，三个文件的字节与
+   `fileDigests` 全变、`contentDigests` 不变 → 卡片如实报「与上次相同」+ 字节校验通过。
+   **这就是「变更看 `contentDigests`、字节看 `fileDigests`」的理由**：拿 `fileDigests` 判变更会永远误报。
+   * 尚未在真站点打到过的分支：**「不一致」那条**（线上远端与内置当前完全一致）。
+     验法：临时把 `/data/songs.json` 里某首曲子某难度的 **`display`（显示等级）** 改掉
+     —— 注意**不能只改 `charts[].level`（定数）**，代码取的是 `chart.display ?? chart.level`；
+     只改 songs.json 不更新清单时，命中的是**校验失败**分支（顶部提醒「字节与清单不符…不做数据对比」），
+     卡片里仍能看到差异明细；把 `version.json` 的 `fileDigests["songs.json"].sha256` 一起改对，
+     才会走到正式的「线上曲目数据与内置快照不一致（1 处等级变化）……」那条提醒。
    **仍然没做的是「把远端数据喂给 Python 求解」** —— 那要先解决门禁：
    `upstream.json` 用 sha256 钉住公开源码与快照，验收 oracle 依赖它；
    真要换成远端数据，得同时给出「数据版本 + 每文件 sha256」的验收口径（服务器侧已提供
