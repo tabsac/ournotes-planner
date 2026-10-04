@@ -247,6 +247,17 @@ try {
     $parts = $step -split '\s+'
     $rest = @()
     if ($parts.Length -gt 1) { $rest = $parts[1..($parts.Length - 1)] }
+
+    # `adb <参数...>`：在**本进程**里敲一次 adb。
+    # 为什么要有这一步：隧道（forward/reverse）由本进程持有，别的 shell 里敲 adb 会换掉 daemon、
+    # 把隧道一起弄没（见文件开头）；而有些取证只能从设备侧做，例如「导出到底有没有真落盘」：
+    #   'adb shell ls -l /sdcard/Download'
+    if ($parts[0] -eq 'adb') {
+      Say "=== adb $($rest -join ' ') ==="
+      A $rest | ForEach-Object { Say "  $_" }
+      continue
+    }
+
     if (-not (Wait-Cdp $env:CDP_PORT 120)) { Say "FATAL: 跑 $step 之前 CDP 就不通"; $failed++; continue }
     # 只等 CDP 通就开跑。
     # ⚠️ 别再拿「手机侧 curl 取 index.html」当 reverse 隧道的健康探针：
@@ -259,7 +270,6 @@ try {
       if (-not $cdpOk) { Say "  gate ${i}: cdp 不通，等隧道补回来 …" }
     }
     Say "  gate: cdp=$cdpOk"
-    Say "  隧道稳定性 $stable/2"
     Dismiss-BrowserDialog | Out-Null
     Say "=== node $step (CDP_PORT=$env:CDP_PORT) ==="
     # 逐行转发（不要先收进变量再打）：watch.js 要跑好几分钟，看不到实时进度就没法判断卡在哪

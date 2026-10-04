@@ -48,7 +48,7 @@ parser.add_argument("--shared-array-buffer", required=True, choices=["true", "fa
 parser.add_argument("--navigator-locks", required=True, choices=["true", "false"])
 parser.add_argument("--case", action="append", default=[], help="用例名，如 solver-ap（可多次）")
 parser.add_argument("--cancel-result", default=None,
-                    help="取消后重跑的结果文件（相对 phone_verify），会额外比一次 solver-ap 的 oracle")
+                    help="取消后重跑的结果文件（相对 work/mobile，即 MOBILE_OUT_DIR），会额外比一次 solver-ap 的 oracle")
 parser.add_argument("--fixture-for-cancel", default="solver-ap")
 parser.add_argument("--notes", default="")
 args = parser.parse_args()

@@ -1,5 +1,28 @@
 # 变更记录
 
+## v0.1.3 — 2026-10-04
+
+- 放宽页面 CSP：`connect-src 'self'` → `connect-src 'self' blob:`。起因是真机上查到的一个**用户可见问题**：
+  手机自带浏览器（实测 X 浏览器）把「下载」挂在自己**注入页面**的脚本上
+  （`downloadBlobUrl: fetch(blob:...)` → FileReader → 原生 `window.mbrowser.getBase64FromBlobData`），
+  而页面 CSP 会拒掉那句 `fetch(blob:...)`（`Refused to connect to 'blob:...'` → `TypeError: Failed to fetch`），
+  于是点「导出本次结果」**没有任何文件落地**。真机取证（控制台、异常栈、`Debugger.getScriptSource`
+  抓出的注入脚本源码、设备侧 `/sdcard` 下无文件）见 `tools/mobile/README.md` 与设计笔记 2j①。
+- **修复后的状态要说清楚**：真机上复验到「CSP 那条拦截消失」（点导出 0 报错、0 异常，旧版必报）；
+  但**文件是否真的落盘尚未确认** —— 两次点击都落在 `visible=hidden` 的后台页面上，
+  而后台页面点导出浏览器根本不会走下载这条路（不报错也不落盘）。把「必须前台可见」写成硬前置之后，
+  云手机链路劣化到跑不完。**待补验**：设计笔记 2j⑥ 第 1 条有现成命令。
+- 手机端工具链加固（都是一跑就白跑一轮的坑）：共用 CDP 客户端 `app-client.js`、
+  选 target 按 reload 的 id 认回来（不再「谁 booted 用谁」）、**前台可见性硬校验**、
+  Service Worker 与缓存清理、`net::ERR_*` 整页重来、`MOBILE_CLEAR_STORAGE=1` 从零算、
+  日志降噪。详见 `tools/mobile/README.md`。
+- 桌面全量验收（`tools/run_checks.py`）在 v0.1.3 上通过：browser 8 / lifecycle 5 / review 3 /
+  images 2 + int64 + score-oracle + power-modes 全绿。真机凭据仍是 v0.1.2 的，门禁因此**如实报**
+  `real_mobile_device_verified=false`（重跑真机并重新生成凭据即可变回 true）。
+
+模型仍固定为公开源码 v0.2.5，数据快照 2026-10-01，计算范围没有变化。只改了页面 CSP，
+不涉及公式、数据与搜索策略；旧计算结果无需重算。
+
 ## v0.1.2 — 2026-10-02
 
 - 修复普通单人演出误用挑战专属成员与 Snap 参数加成的问题；普通与挑战按各自的综合力进行分数、评级、收益和配队搜索。

@@ -1,6 +1,6 @@
 """发真 COOP/COEP 头的最小静态服务，用来单独验证手机浏览器的跨源隔离能力。
 
-    python -u on_cards/phone_verify/coi_server.py --port 8898
+    python -u tools/mobile/coi_server.py --port 8898
 """
 from functools import partial
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler

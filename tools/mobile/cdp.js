@@ -3,10 +3,10 @@
  * （WebView 不支持 Browser 级上下文管理，所以 Playwright 的 connectOverCDP 用不了，
  *   这里直接连 page target 的 WebSocket。）
  *
- *   node on_cards/phone_verify/cdp.js dump             # 页面状态摘要
- *   node on_cards/phone_verify/cdp.js eval "<js>"      # 求值（支持 await）
- *   node on_cards/phone_verify/cdp.js listen <秒>      # 实时收集 console / 异常
- *   node on_cards/phone_verify/cdp.js reload
+ *   node tools/mobile/cdp.js dump             # 页面状态摘要
+ *   node tools/mobile/cdp.js eval "<js>"      # 求值（支持 await）
+ *   node tools/mobile/cdp.js listen <秒>      # 实时收集 console / 异常
+ *   node tools/mobile/cdp.js reload
  *
  * 前提：adb -s <serial> forward tcp:9222 localabstract:webview_devtools_remote_<pid>
  */

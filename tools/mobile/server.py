@@ -7,7 +7,7 @@
 刻意不发 COOP/COEP —— 这正是要复现的「手机自带浏览器」环境。
 
 用法：
-    python -u on_cards/phone_verify/server.py --port 8899
+    python -u tools/mobile/server.py --port 8899
 """
 from functools import partial
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler

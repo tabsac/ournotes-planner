@@ -1,138 +1,156 @@
 /**
  * 真机验「无 SharedArrayBuffer 时的取消通道」：
- *   ① 起一次计算，3 秒后点取消 → 应当走进度/提示里出现「取消」，且不崩；
- *   ② 紧接着再跑一次正常计算 → 必须照样算出结果并与 oracle 一致
- *      （验证取消没有把「已取消」写进求解缓存、求解进程能被重建）。
+ *   ① 起一次计算，**等它进入代价最高的求解阶段**再点取消 → 应当最终落到「计算已取消」，且不崩；
+ *   ② 紧接着再跑一次正常计算 → 必须照样算出结果（并与 oracle 逐条一致，交给 compare.js）
+ *      —— 验证取消没有把「已取消」写进求解缓存、求解进程能被重建。
  *
- *   node on_cards/phone_verify/cancel_test.js solver-ap
+ *   node cancel_test.js [fixture=solver-ap]
+ *
+ * 第 15 轮这个用例没验成，原因写进了设计笔记 2i⑥，本文件是针对那两条改的：
+ *
+ *   * **老写法在页面里跑一次长 `await`**（RPC 里最长等 180 秒/900 秒），中途断线/掉 target
+ *     就整条命令一直不返回（实测阶段 [2] 挂住 8 分钟）；现在一律**主机侧轮询**，
+ *     每次求值都有超时（见 app-client.js），断了就重连接着等。
+ *   * **老写法「取第一个同 URL 的 page target」**：新机上同时存在 `/ournotes-planner/`
+ *     与 `.../#plan` 两个 target，可能连到那个空壳/后台的，于是「点了取消页面什么也没发生」；
+ *     现在由 `Session.attach()` 先探测再选（前台可见 / 已 boot 的优先）。
+ *   * **老写法的等待条件本身是错的**：它等「进度标题或提示里出现『取消』」，
+ *     而点下取消的**那一刻**应用就把标题改成「正在取消…」—— 条件立刻满足，
+ *     于是它没等到任何结果就往下走（真机日志里就是「`resultsHidden=true` 但 message 为空」）。
+ *     现在等的终态是 `#message` 出现「计算已取消」（应用只在这一步才写它）。
+ *
+ * 环境开关：CANCEL_STAGE_MS（等求解阶段的上限，默认 120000）
+ *           CANCEL_NOTICE_MS（点了取消之后等终态的上限，默认 180000）
+ *           CANCEL_RERUN_MIN（② 重跑的上限分钟数，默认 20）
  */
 const fs = require('node:fs');
 const path = require('node:path');
-const http = require('node:http');
+const {Session, OUT_DIR, sleep} = require('./app-client');
 
-const PORT = Number(process.env.CDP_PORT || 9222);
 const FIXTURE = process.argv[2] || 'solver-ap';
-// 仓库根目录（本文件在 tools/mobile/ 下）
-const REPO = path.resolve(__dirname, '..', '..');
-// 产出的结果 / 进度轨迹都写到这里（work/ 已在 .gitignore 里），可用 MOBILE_OUT_DIR 覆盖
-const OUT_DIR = process.env.MOBILE_OUT_DIR || path.join(REPO, 'work', 'mobile');
+const STAGE_MS = Number(process.env.CANCEL_STAGE_MS || 120000);
+const NOTICE_MS = Number(process.env.CANCEL_NOTICE_MS || 180000);
+const RERUN_MIN = Number(process.env.CANCEL_RERUN_MIN || 20);
+// 「代价最高的求解阶段」：真机轨迹里就是这一段（第 15 轮实测它单独跑了 76 秒）
+const SOLVE_STAGE = /精确求解/;
+// 应用的终态提示（generated-app.js 里 `job.status === 'cancelled'` / 取消后仍完成 两条都含它）
+const CANCELED_NOTICE = '计算已取消';
 
-const targets = async (tries = 8) => {
-  let last;
-  for (let i = 1; i <= tries; i++) {
-    try {
-      return await new Promise((resolve, reject) => {
-        const req = http.get({host: '127.0.0.1', port: PORT, path: '/json', agent: false,
-          headers: {Connection: 'close'}}, (res) => {
-          let body = ''; res.on('data', (c) => (body += c));
-          res.on('end', () => { try { resolve(JSON.parse(body)); } catch (e) { reject(e); } });
-        });
-        req.on('error', reject);
-        req.setTimeout(8000, () => req.destroy(new Error('timeout')));
-      });
-    } catch (e) { last = e; await new Promise((r) => setTimeout(r, 1500)); }
-  }
-  throw new Error(`/json 连续 ${tries} 次无响应: ${last && last.message}`);
-};
-
-class CDP {
-  constructor(url) { this.url = url; this.id = 0; this.pending = new Map(); }
-  connect() {
-    return new Promise((resolve, reject) => {
-      this.ws = new WebSocket(this.url);
-      this.ws.onopen = () => resolve();
-      this.ws.onerror = (e) => reject(new Error('ws error: ' + (e.message || '')));
-      this.ws.onmessage = (ev) => {
-        const m = JSON.parse(ev.data);
-        if (m.id && this.pending.has(m.id)) {
-          const {resolve: ok, reject: bad} = this.pending.get(m.id);
-          this.pending.delete(m.id);
-          m.error ? bad(new Error(JSON.stringify(m.error))) : ok(m.result);
-        }
-      };
-    });
-  }
-  send(method, params = {}) {
-    const id = ++this.id;
-    return new Promise((resolve, reject) => { this.pending.set(id, {resolve, reject}); this.ws.send(JSON.stringify({id, method, params})); });
-  }
-}
+const session = new Session({label: 'cancel', talkative: true});
+const samples = [];
 
 (async () => {
-  const list = await targets();
-  // 注意别用 endsWith：应用算完会把 URL 变成 .../ournotes-planner/#plan
-  const page = list.find((t) => t.type === 'page' && t.url.includes('/ournotes-planner/') && !t.url.includes('/_pt/'));
-  if (!page) throw new Error('没找到应用页');
-  // devtools 给的 ws 端口不一定等于我们 forward 的端口，统一改写
-  const ws = new URL(page.webSocketDebuggerUrl);
-  ws.host = `127.0.0.1:${PORT}`;
-  const cdp = new CDP(ws.toString());
-  await cdp.connect();
-  const evaluate = async (expression) => {
-    const r = await cdp.send('Runtime.evaluate', {expression, awaitPromise: true, returnByValue: true});
-    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
-    return r.result?.value;
-  };
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  await session.boot({attempts: 4, budgetMs: 5 * 60 * 1000});
+  session.log('booted');
+  session.log('env: ' + JSON.stringify(await session.read(
+    `({isolated: crossOriginIsolated, sab: typeof SharedArrayBuffer, secure: isSecureContext,
+       locks: !!navigator.locks, ua: navigator.userAgent})`)));
+  await session.importFixture(FIXTURE);
 
-  // 导入用的 fixture 从**主机侧**读进来再注入，不依赖 dist 里多放一个文件
-  // （dist 必须和已发布的 docs/ 逐字节一致，不能为了测试往里塞东西）。
-  const fixture = JSON.parse(fs.readFileSync(path.join(REPO, 'browser', 'work', 'fixtures', `${FIXTURE}.json`), 'utf8'));
-  const requestText = JSON.stringify(fixture.request);
-  await evaluate(`(async () => {
-    if (!document.getElementById('name').value) {
-      const input = document.getElementById('import'), dt = new DataTransfer();
-      dt.items.add(new File([${JSON.stringify(requestText)}], 'request.json', {type:'application/json'}));
-      input.files = dt.files; input.dispatchEvent(new Event('change', {bubbles:true}));
-      await new Promise(r => setTimeout(r, 4000));
-    }
-    return document.getElementById('name').value; })()`);
+  // ---------------------------------------------------------------- 阶段 ①
+  // 起计算 → 主机侧轮询到「精确求解中…」→ 点取消 → 主机侧轮询到终态
+  session.log(`[1] 开始计算，进入「${SOLVE_STAGE.source}」后点取消 …`);
+  await session.act("document.getElementById('calculate').click(); 'clicked'");
 
-  console.log('[1] 起一次计算，3 秒后取消 …');
-  const cancelPhase = await evaluate(`(async () => {
-    const $ = id => document.getElementById(id);
-    $('calculate').click();
-    await new Promise(r => setTimeout(r, 3000));
-    const before = {title: $('progressTitle').textContent, cancelDisabled: $('cancel').disabled};
-    $('cancel').click();
-    const t0 = Date.now();
-    while (Date.now() - t0 < 180000) {
-      await new Promise(r => setTimeout(r, 1500));
-      const msg = $('message').textContent || '', title = $('progressTitle').textContent || '';
-      if (msg.includes('取消') || title.includes('取消')) break;
+  let entered = null;
+  const stageDeadline = Date.now() + STAGE_MS;
+  let lastStageLog = 0;
+  while (Date.now() < stageDeadline) {
+    await sleep(1000);
+    let state;
+    try { state = await session.state(); } catch (e) { continue; }
+    samples.push({t: Date.now(), stage: 'wait-solve', title: state.title, msg: state.msg, busy: state.busy});
+    if (Date.now() - lastStageLog > 15000) {
+      lastStageLog = Date.now();
+      session.log(`  … ${state.title} || ${state.count}`);
     }
-    await new Promise(r => setTimeout(r, 3000));
-    return {before, title: $('progressTitle').textContent, message: $('message').textContent,
-            resultsHidden: $('results').hidden, cancelling: $('cancel').disabled};
-  })()`);
-  console.log('[1] 结果:', JSON.stringify(cancelPhase));
-
-  console.log('[2] 再跑一次完整计算 …');
-  const second = await evaluate(`(async () => {
-    const $ = id => document.getElementById(id);
-    $('calculate').click();
-    const t0 = Date.now();
-    while (Date.now() - t0 < 900000) {
-      await new Promise(r => setTimeout(r, 3000));
-      if (!$('results').hidden) break;
+    // 还没点取消就算完了：说明这个 fixture 在手机上一眨眼就跑完，本用例验不了取消
+    if (state.done || (!state.busy && !/取消/.test(state.title))) {
+      throw new Error(`还没点取消，这次计算就已经结束（title=${JSON.stringify(state.title)}）` +
+        ` —— 说明本用例需要更长的搜索，换 fixture 或改小 CANCEL_STAGE_MS`);
     }
-    if ($('results').hidden) return {done: false, title: $('progressTitle').textContent, message: $('message').textContent};
-    const blob = await new Promise(resolve => {
-      const original = URL.createObjectURL;
-      URL.createObjectURL = b => { URL.createObjectURL = original; resolve(b); return original.call(URL, b); };
-      $('exportResult').click();
-    });
-    return {done: true, seconds: Math.round((Date.now() - t0) / 1000), payload: await blob.text()};
-  })()`);
-  console.log('[2] done=%s seconds=%s', second.done, second.seconds);
-  if (second.done) {
-    fs.mkdirSync(OUT_DIR, {recursive: true});
-    const out = path.join(OUT_DIR, `result-after-cancel-${FIXTURE}.json`);
-    fs.writeFileSync(out, second.payload);
-    console.log('[2] 已保存', path.basename(out));
-  } else {
-    console.log('[2] 失败:', JSON.stringify(second));
-    process.exitCode = 1;
+    if (SOLVE_STAGE.test(state.title)) { entered = state; break; }
   }
-  cdp.ws.close();
-})().catch((e) => { console.error('FAILED:', e.message); process.exit(1); });
+  if (!entered) throw new Error(`${STAGE_MS}ms 内没等到求解阶段，最后一条 ${JSON.stringify(samples.at(-1))}`);
+
+  const before = await session.state();
+  session.log(`[1] 求解阶段中，点取消。期间进度：${JSON.stringify(before.title)} || ${JSON.stringify(before.count)}`);
+  session.log(`[1] 取消按钮 disabled=${before.cancelDisabled}`);
+  const clickAt = Date.now();
+  const clicked = await session.act(`(() => { const b = document.getElementById('cancel');
+    const wasDisabled = b.disabled; b.click();
+    return {wasDisabled, titleNow: document.getElementById('progressTitle').textContent}; })()`);
+  session.log(`[1] cancel clicked: ${JSON.stringify(clicked)}`);
+
+  let terminal = null;
+  const noticeDeadline = clickAt + NOTICE_MS;
+  let lastNoticeLog = 0;
+  while (Date.now() < noticeDeadline) {
+    await sleep(1000);
+    let state;
+    try { state = await session.state(); } catch (e) { continue; }
+    samples.push({t: Date.now(), stage: 'wait-cancel', title: state.title, msg: state.msg, busy: state.busy});
+    if (String(state.msg).includes(CANCELED_NOTICE)) { terminal = state; break; }
+    if (state.error) throw new Error('取消过程中页面报错：' + state.msg);
+    if (Date.now() - lastNoticeLog > 15000) {
+      lastNoticeLog = Date.now();
+      session.log(`  … 等取消落地：title=${JSON.stringify(state.title)} msg=${JSON.stringify(state.msg)}`);
+    }
+  }
+  const noticeSeconds = Math.round((Date.now() - clickAt) / 1000);
+  if (!terminal) {
+    const last = samples.at(-1) || {};
+    throw new Error(`点了取消 ${noticeSeconds} 秒后仍未出现「${CANCELED_NOTICE}」` +
+      `（title=${JSON.stringify(last.title)} msg=${JSON.stringify(last.msg)}）`);
+  }
+  session.log(`[1] 取消落地：${noticeSeconds} 秒后 msg=${JSON.stringify(terminal.msg.slice(0, 80))}…`);
+  if (terminal.busy) session.log('[1] 注意：取消提示已出现，但进度框还没收起');
+  if (terminal.done) throw new Error('取消之后居然出了结果面板 —— 取消没有生效');
+
+  // ---------------------------------------------------------------- 阶段 ②
+  session.log('[2] 重新跑一次完整计算 …');
+  const rerunStart = Date.now();
+  const final = await session.calculateAndWait({maxMinutes: RERUN_MIN});
+  const rerunSeconds = Math.round((Date.now() - rerunStart) / 1000);
+  session.log(`[2] ${JSON.stringify(final)}（${rerunSeconds} 秒）`);
+  if (!final.done) throw new Error('取消后重跑没出结果：' + JSON.stringify(final));
+
+  const payload = await session.exportPayload();
+  fs.mkdirSync(OUT_DIR, {recursive: true});
+  const out = path.join(OUT_DIR, `result-after-cancel-${FIXTURE}.json`);
+  fs.writeFileSync(out, payload);
+  session.log(`[2] 已保存 ${path.basename(out)}（${payload.length} 字节）`);
+
+  const parsed = JSON.parse(payload);
+  const summary = {
+    fixture: FIXTURE,
+    checked_at: new Date().toISOString(),
+    stage_when_canceled: before.title,
+    progress_when_canceled: before.count,
+    cancel_click_title: clicked && clicked.titleNow,   // 应用在这一刻会写「正在取消…」
+    cancel_notice: terminal.msg,
+    cancel_notice_seconds: noticeSeconds,
+    results_hidden_after_cancel: !terminal.done,
+    rerun_seconds: rerunSeconds,
+    rerun: {algorithm: parsed.result?.search?.algorithm,
+            optimality_proven: parsed.result?.search?.optimality_proven,
+            complete: parsed.result?.search?.complete},
+    samples: samples.map((s) => ({t: s.t, stage: s.stage, title: s.title, busy: s.busy})),
+  };
+  fs.writeFileSync(path.join(OUT_DIR, `cancel-${FIXTURE}.json`),
+    JSON.stringify(summary, null, 2), 'utf8');
+  session.log(`[1] 取消阶段＝${JSON.stringify(before.title)}；取消落地用时 ${noticeSeconds} 秒`
+    + `；② 重跑 ${rerunSeconds} 秒，algorithm=${summary.rerun.algorithm}`);
+  session.log(`PASSED  cancel-${FIXTURE}（明细 work/mobile/cancel-${FIXTURE}.json）`);
+  session.close();
+  process.exit(0);
+})().catch((error) => {
+  console.error('FAILED:', error.message);
+  try {
+    fs.mkdirSync(OUT_DIR, {recursive: true});
+    fs.writeFileSync(path.join(OUT_DIR, `cancel-${FIXTURE}.json`),
+      JSON.stringify({fixture: FIXTURE, passed: false, error: error.message,
+        checked_at: new Date().toISOString()}, null, 2), 'utf8');
+  } catch {}
+  process.exit(1);
+});

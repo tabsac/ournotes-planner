@@ -187,7 +187,13 @@ def main():
     (PUBLIC / ".nojekyll").write_text("", "utf-8")
     html = replace_once(html, '<link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script>',
                         '<link rel="stylesheet" href="./style.css"><script type="module" src="./main.js"></script>')
-    html = replace_once(html, '<head>', '<head><meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\' \'unsafe-eval\'; worker-src \'self\' blob:; img-src \'self\' data:; connect-src \'self\'; object-src \'none\'; base-uri \'self\';">')
+    # ⚠️ connect-src 里的 `blob:` 不是可有可无的（v0.1.3 加回来的）：
+    #    手机自带浏览器（实测 X 浏览器）把「下载」挂在自己注入页面的脚本上 —— 页面 `a.click()`
+    #    一个 blob: 链接之后，它用 `fetch(blob:...)` 取字节、再交给原生层落盘。
+    #    少了 blob: 这句 fetch 会被本页 CSP 拒掉（`Refused to connect to 'blob:...'`），
+    #    紧接着 `TypeError: Failed to fetch`，表现为**点了「导出本次结果」没有任何文件落地**。
+    #    真机取证与复现步骤见 tools/mobile/README.md 与设计笔记 2j④。
+    html = replace_once(html, '<head>', '<head><meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\' \'unsafe-eval\'; worker-src \'self\' blob:; img-src \'self\' data:; connect-src \'self\' blob:; object-src \'none\'; base-uri \'self\';">')
     html = replace_once(html, '<title>', '<link rel="icon" href="./favicon.svg"><title>')
     (PUBLIC / "favicon.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="16" fill="#7667de"/><path d="M32 8 38 26 56 32 38 38 32 56 26 38 8 32 26 26Z" fill="white"/></svg>', "utf-8")
     html = html.replace("OUR NOTES / LOCAL PLANNER", "OUR NOTES / BROWSER PLANNER").replace("本地运行", "浏览器计算")

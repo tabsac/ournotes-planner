@@ -2,7 +2,8 @@
  * 把真机导出的结果和原生 oracle 逐条比。
  * 判据与 browser/tests/check_browser.cjs 里的 compare() 完全一致。
  *
- *   node on_cards/phone_verify/compare.js solver-ap
+ *   node compare.js solver-ap
+ *   node compare.js solver-ap result-after-cancel-solver-ap.json   # 第三个参数 = 要比对的结果文件
  */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -13,13 +14,28 @@ const REPO = path.resolve(__dirname, '..', '..');
 // 产出的结果 / 进度轨迹都写到这里（work/ 已在 .gitignore 里），可用 MOBILE_OUT_DIR 覆盖
 const OUT_DIR = process.env.MOBILE_OUT_DIR || path.join(REPO, 'work', 'mobile');
 const name = process.argv[2] || 'solver-ap';
-// 第三个参数可选：指定要比对的导出结果文件（例如取消后重跑的 result-after-cancel-*.json）
-const actualPath = process.argv[3]
-  ? path.resolve(process.argv[3])
-  : path.join(OUT_DIR, `result-${name}.json`);
+// 第三个参数可选：指定要比对的导出结果文件（例如取消后重跑的 result-after-cancel-*.json）。
+// 相对路径**按 OUT_DIR 解析**（驱动是 cwd=tools/mobile 跑的，所以 `work/mobile/x.json`
+// 这种仓库相对写法在这里是不存在的路径 —— 之前踩过）。
+function resolveActual(arg, fallback) {
+  if (!arg) return fallback;
+  if (path.isAbsolute(arg)) return arg;
+  const candidates = [path.resolve(arg), path.join(OUT_DIR, arg)];
+  const hit = candidates.find((p) => fs.existsSync(p));
+  if (!hit) {
+    throw new Error(`找不到要比对的结果文件 ${arg}；找过：\n  ${candidates.join('\n  ')}`);
+  }
+  return hit;
+}
+const actualPath = resolveActual(process.argv[3], path.join(OUT_DIR, `result-${name}.json`));
 const actual = JSON.parse(fs.readFileSync(actualPath, 'utf8')).result;
-const fixture = JSON.parse(fs.readFileSync(path.join(REPO, 'browser', 'work', 'fixtures', `${name}.json`), 'utf8'));
+// fixture 用哪一份与 watch.js 走同一套规则（优先 work/validation），并把实际路径打出来
+const {fixturePath} = require('./app-client');
+const fixtureFile = fixturePath(name);
+const fixture = JSON.parse(fs.readFileSync(fixtureFile, 'utf8'));
 const expected = fixture.expected;
+console.log(`  （比对对象：${actualPath}）`);
+console.log(`  （oracle：${fixtureFile}）`);
 
 function key(row, objective) {
   const other = objective === 'event_pt' ? 'shop_pt' : 'event_pt';
