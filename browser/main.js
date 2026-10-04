@@ -220,8 +220,32 @@ async function start() {
   await import('./generated-app.js');
   const {mountAccountImport} = await import('./account-ui.js');
   mountAccountImport(document.getElementById('accountImportRoot'));
-  const {mountB25} = await import('./b25-ui.js');
+  const {mountB25, loadScores, saveRecord} = await import('./b25-ui.js');
   mountB25(document.getElementById('b25Root'));
+
+  // ---- 云端账号 / 结果 / 卡库同步（可选功能；没配后端就一个请求都不发） ----
+  const profileCloud = await import('./profile-cloud.js');
+  const {setProfileCloudSync} = await import('./profile-storage.js');
+  const profileBridge = window.PlannerProfile;
+  if (profileBridge) {
+    profileCloud.attachProfileCloud({
+      getDocument: () => profileBridge.document(),
+      installDocument: document => profileBridge.install(document),
+    });
+    // 本地卡库写成功后通知云端（延迟合并推送；失败只改状态，不阻塞编辑）
+    setProfileCloudSync(() => profileCloud.noteLocalSave());
+  }
+  const {mountCloudPanel} = await import('./cloud-ui.js');
+  mountCloudPanel(document.getElementById('cloudRoot'), {
+    getCardRecord: () => loadScores(),
+    onCardLoaded: (record, note) => { saveRecord(record); window.dispatchEvent(new CustomEvent('ournotes-cloud-card-loaded', {detail: note || ''})); },
+  });
+  const cloudBadge = document.getElementById('cloudBadge');
+  if (cloudBadge) {
+    cloudBadge.addEventListener('click', () => {
+      document.querySelector('.tabs button[data-tab="cloud"]')?.click();
+    });
+  }
 }
 
 start().catch(error => {

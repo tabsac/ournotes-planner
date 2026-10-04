@@ -274,26 +274,37 @@ def main():
 
     # ---- 「账号包导入」页：一个 tab 按钮 + 一个容器 section（内容由 account-ui.js 渲染）----
     # ---- 「B25 成绩」页：独立页签，内容由 b25-ui.js 渲染（数据由账号页存进 localStorage）----
+    # ---- 「账号」页：云端账号 + 结果 + 卡库同步（cloud-ui.js 渲染）----
     html = replace_once(
         html,
         '<button data-tab="software">关于网页版</button>',
         '<button data-tab="account">账号包导入</button><button data-tab="b25">B25 成绩</button>'
+        '<button data-tab="cloud">账号</button>'
         '<button data-tab="software">关于网页版</button>')
     html = replace_once(
         html,
         ' <section id="software"',
         ' <section id="account" class="tab-page" hidden><div id="accountImportRoot"></div></section>\n'
         ' <section id="b25" class="tab-page" hidden><div id="b25Root"></div></section>\n'
+        ' <section id="cloud" class="tab-page" hidden><div id="cloudRoot"></div></section>\n'
         ' <section id="software"')
+    # 头部小标识：未登录 / 用户名 / 同步状态，点它跳到「账号」页（main.js 里绑事件）。
+    # ⚠️ 必须做成 `#profileBadge` 的**兄弟节点**：generated-app.js 会 `profileBadge.textContent = …`，
+    #    那一下会把所有子节点清掉（踩过）。
+    html = replace_once(
+        html,
+        '<div id="profileHint"',
+        '<span id="cloudBadge" class="badge cloud-badge" role="button" tabindex="0">云端未启用</span>'
+        '<div id="profileHint"')
 
     (HERE / "index.html").write_text(html, "utf-8")
     (HERE / "style.css").write_bytes(css + b"\n" + (HERE / "account.css").read_bytes())
     app = replace_once(app, 'const STORE = "ournotes-local-planner-v1-profile";', 'const STORE = "ournotes-browser-planner-v1-profile:" + window.Planner.scope;')
-    # 深链接白名单：上游只列了自己那几页，账号页和 B25 页要补上，否则 #b25 打不开
+    # 深链接白名单：上游只列了自己那几页，账号页 / B25 页 / 账号页要补上，否则 #b25 打不开
     app = replace_once(
         app,
         'if (["plan","inventory","growth","evidence","software"].includes(tab)) showTab(tab);',
-        'if (["plan","inventory","growth","evidence","account","b25","software"].includes(tab)) showTab(tab);')
+        'if (["plan","inventory","growth","evidence","account","b25","cloud","software"].includes(tab)) showTab(tab);')
     profile_code = '''import {createProfileStorage} from './profile-storage.js';
 function profileWarning(id, text) {
   let panel = document.getElementById(id);
@@ -315,6 +326,22 @@ const profileStore = createProfileStorage(STORE, () => {
     save_start = app.index('function save() {')
     save_end = app.index('function changed()', save_start)
     app = app[:save_start] + 'function save() {profileStore.save(JSON.stringify(state));}\n' + app[save_end:]
+    # 卡库的云端同步桥：让「账号」页能拿到当前卡库、并把云端那份装回来。
+    # 装回走 replaceState（它会跑 normalizeImport 校验 + 重画输入区）；
+    # 正在计算或本页已经不是最新卡库时**拒绝**安装，避免把用户正在填的东西冲掉。
+    app = replace_once(
+        app,
+        'function save() {profileStore.save(JSON.stringify(state));}',
+        '''function save() {profileStore.save(JSON.stringify(state));}
+window.PlannerProfile = {
+  document: () => clone(state),
+  install: (document) => {
+    if (jobId || profileStore.outOfDate) return false;
+    try {replaceState(document);} catch {return false;}
+    return true;
+  },
+  storage: profileStore,
+};''')
     app = replace_once(app, 'const saved = localStorage.getItem(STORE);', 'const saved = profileStore.load();')
     app = replace_once(app, 'function replaceState(x) { if (jobId) return;', 'function replaceState(x) { if (jobId || profileStore.outOfDate) return;')
     app = replace_once(app, '$("inputArea").disabled = on;', '$("inputArea").disabled = on || profileStore.outOfDate;')

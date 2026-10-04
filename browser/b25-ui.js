@@ -7,7 +7,7 @@
  *
  * 换算规则：AP 算原值，FULL COMBO 算原值 − fcPenalty，最后取平均。
  */
-import {mountCloudPanel} from "./cloud-ui.js";
+import * as cloud from "./cloud-api.js";
 
 const STORE_KEY = "ournotes-b25-v1";
 const EVENT = "ournotes-b25-updated";
@@ -240,37 +240,68 @@ export function mountB25(root) {
   </div>`;
     }
     /**
-     * 挂云端面板。**空状态也要挂** —— 换设备的人第一眼就是空的，
-     * 得能在那儿登录、把云端那张卡取回来。
+     * B25 页上的**窄条**：只显示登录态 + 「存到云端」+ 「去账号页」。
+     * 登录/注册/绑定 QQ/卡库同步都在「账号」页（cloud-ui.js），这里不重复。
+     * **没启用云端（公开镜像站）时一个请求都不发**，只显示一句提示。
      */
-    function mountCloud(extras) {
-        const host = root.querySelector("#cloudPanel");
+    function mountCloudBar(extras) {
+        const host = root.querySelector("#cloudBar");
         if (!host) return;
-        const flash = cloudFlash;
-        cloudFlash = "";
-        try {
-            mountCloudPanel(host, {
-                initialMessage: flash,
-                getRecord: () => loadScores(),
-                // 取回后卡片要整块重画（云端面板也会被重建），提示语得跟着带过去。
-                // ⚠️ 这里**不要**自己再 render 一次：saveRecord 已经派发 EVENT → render，
-                //    多画一次会把刚带过去的提示语吃掉（第二次挂载时 flash 已消费）。
-                onRecordLoaded: (payload, note) => {
-                    cloudFlash = note || "";
-                    saveRecord(payload);
-                },
+        const account = cloud.currentAccount();
+        const configured = cloud.isConfigured();
+        const record = loadScores();
+        host.innerHTML = `
+<div class="b25-cloud-bar">
+  <span class="cloud-dim">云端：${!configured ? "本页未启用（用官方站点）"
+        : account ? `已登录 ${esc(account.username || "")}` : "未登录"}</span>
+  <button id="cloudBarUpload" type="button" ${!configured || !account || !record ? "disabled" : ""}>把这张卡存到云端</button>
+  <button id="cloudBarGoto" type="button">账号页：取回 / 卡库同步</button>
+  <span id="cloudBarState" class="cloud-dim"></span>
+</div>`;
+
+        const state = host.querySelector("#cloudBarState");
+        if (cloudFlash) { state.textContent = cloudFlash; cloudFlash = ""; }
+        host.querySelector("#cloudBarGoto").addEventListener("click", () => {
+            document.querySelector('.tabs button[data-tab="cloud"]')?.click();
+        });
+        const upload = host.querySelector("#cloudBarUpload");
+        if (upload) {
+            upload.addEventListener("click", async () => {
+                const current = loadScores();
+                if (!current) return;
+                upload.disabled = true;
+                state.textContent = "正在上传…";
+                try {
+                    const linked = cloud.linkedResult("b25");
+                    const body = {
+                        title: `B25 成绩 · ${current.playerName || current.player?.name || "（未命名）"}`,
+                        summary: `Rating ${current.stats?.rating_avg ?? "-"} · ${current.stats?.count ?? current.entries.length} 首`,
+                        payload: current,
+                    };
+                    if (linked?.id) {
+                        const updated = await cloud.updateResult(linked.id, {payload: current, version: linked.version});
+                        cloud.setLinkedResult({id: linked.id, version: updated?.version ?? (linked.version + 1)}, "b25");
+                        state.textContent = "已覆盖云端那条" + (updated.localNotice ? "（" + updated.localNotice + "）" : "");
+                    } else {
+                        const created = await cloud.createResult(body);
+                        cloud.setLinkedResult({id: created.id, version: created.version ?? 1}, "b25");
+                        state.textContent = "已存到云端" + (created.localNotice ? "（" + created.localNotice + "）" : "");
+                    }
+                } catch (error) {
+                    state.textContent = cloud.describeError(error);
+                } finally {
+                    upload.disabled = false;
+                }
             });
-        } catch (error) {
-            console.warn("云端面板挂载失败（不影响本地卡片）：", error);
         }
     }
 
     function render(extras) {
         const record = loadScores();
         if (!record) {
-            root.innerHTML = emptyHtml() + '<div id="cloudPanel"></div>';
+            root.innerHTML = emptyHtml() + '<div id="cloudBar"></div>';
             bindGoto();
-            mountCloud(extras);
+            mountCloudBar(extras);
             return;
         }
 
@@ -291,7 +322,7 @@ export function mountB25(root) {
     <button id="b25Clear" type="button">清除成绩</button>
     <span id="b25State" class="b25-dl-state"></span>
   </div>
-  <div id="cloudPanel"></div>
+  <div id="cloudBar"></div>
 </div>`;
 
         root.querySelectorAll("img[data-fallback]").forEach(img => {
@@ -303,8 +334,8 @@ export function mountB25(root) {
             });
         });
 
-        // 云端同步（可选）：没配服务器地址时它一个请求都不发
-        mountCloud(extras);
+        // 云端窄条：没启用云端时一个请求都不发（登录/绑定/卡库都在「账号」页）
+        mountCloudBar(extras);
 
         const state = root.querySelector("#b25State");
         root.querySelector("#b25Download").addEventListener("click", (event) => {
@@ -339,6 +370,11 @@ export function mountB25(root) {
 
     window.addEventListener(EVENT, () => render(extras));
     window.addEventListener("storage", (event) => { if (event.key === key()) render(extras); });
+    // 从「账号」页取回云端成绩卡后，这一页也要重画，并把提示语带过来
+    window.addEventListener("ournotes-cloud-card-loaded", (event) => {
+        cloudFlash = String(event.detail || "");
+        render(extras);
+    });
     let extras = null;
     render(null);
     loadExtras().then(value => { extras = value; render(extras); });

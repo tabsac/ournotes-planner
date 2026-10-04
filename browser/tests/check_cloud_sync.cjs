@@ -1,15 +1,16 @@
 /**
- * 「云端结果」端到端检查：用本地替身服务器（mock_api_server.cjs）跑完整链路。
+ * 账号系统（v2）+ 云端同步的端到端检查。
  *
- * 覆盖：
- *   ① 没配地址时**一个请求都不发**、也没有控制台报错（公开站点的状态）
- *   ② 登录码登录（错的码要被挡）
- *   ③ 把本机卡片存到云端（POST）
- *   ④ **换设备**（全新 context、没有 localStorage）登录后取回，卡片完整还原
- *   ⑤ 覆盖更新走 PUT + 版本冲突返回 409
- *   ⑥ 服务器挂掉时：本地卡片照常显示，面板只写错误，不崩
+ * 覆盖《网页-服务器对接-账号系统变更.md》§6 验收里网页端负责的那几条：
+ *   ① 注册 → 自动登录 → 刷新后仍是登录态（GET /api/me 200）
+ *   ② 绑定 QQ 全流程：错误 QQ 发送被拒**且码不消耗**；本人发送成功；界面靠 3 秒轮询自动变「已绑定」
+ *   ③ 结果：存一条 → 换一个浏览器登录同账号能看到它 → 删除
+ *   ④ 卡库：本机编辑 → 自动上传 → 换设备恢复
+ *   ⑤ 改密后旧 token 立即失效、被迫重新登录
+ *   ⑥ 503（nginx 限流，HTML）：退避重试一次能成功；连续 503 给出「操作太快」提示
+ *   ⑦ 未配置后端时零请求零报错；401 清 token；token 不进 URL
  *
- *   node browser/tests/check_cloud_sync.cjs            （需要 browser/dist 已构建）
+ *   node browser/tests/check_cloud_sync.cjs
  */
 const fs = require("fs");
 const path = require("path");
@@ -18,18 +19,19 @@ const {chromium} = require(process.env.OURNOTES_PLAYWRIGHT_MODULE || "playwright
 
 const ROOT = path.resolve(__dirname, "../..");
 const PYTHON = process.env.OURNOTES_PYTHON || (process.platform === "win32" ? "python" : "python3");
-// 用哪一份「服务器」来跑：mock（JS 替身，固定登录码）或 reference（文档 §9 的 Python 参考实现）
-const SERVER_MODE = process.env.CLOUD_CHECK_SERVER || "mock";
-const REFERENCE_SERVER = process.env.CLOUD_CHECK_REFERENCE
-    || path.join(ROOT, "work/reference_api_server.py");
-const BOT_SECRET = "test-bot-secret";
 const PREVIEW_PORT = Number(process.env.CLOUD_CHECK_PORT || 8879);
 const API_PORT = Number(process.env.CLOUD_CHECK_API_PORT || 8907);
 const BASE = `http://127.0.0.1:${PREVIEW_PORT}/ournotes-planner/`;
-const API_BASE = "/cloud-api";                       // 同源代理前缀（CSP 只需 'self'）
+const API_BASE = "/cloud-api";
 const SAMPLE = path.join(__dirname, "_b25_sample",
     "5e1ecee06a7fc06f305ae5c12acfe7a7f67b8ece7af76932ed3afab00c3c6921");
 const SHOT_DIR = process.env.OURNOTES_CLOUD_SHOT_DIR || path.join(ROOT, "work/cloud-check");
+
+const USERNAME = "karen_" + Math.floor(Date.now() / 1000) % 100000;
+const PASSWORD = "web-test-pw-1";
+const NEW_PASSWORD = "web-test-pw-2";
+const QQ = "44008952";
+const WRONG_QQ = "1234567890";
 
 const problems = [];
 const check = (ok, label, detail) => {
@@ -50,255 +52,391 @@ const waitFor = (child, marker, timeout = 30000) => new Promise((resolve, reject
 });
 
 const started = [];
-function launch(command, args, marker, env) {
-    const child = spawn(command, args, {cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], env: {...process.env, ...env}});
+function launch(command, args, marker) {
+    const child = spawn(command, args, {cwd: ROOT, stdio: ["ignore", "pipe", "pipe"]});
     started.push(child);
     return waitFor(child, marker).then(() => child);
 }
 
-/** 问服务器要一个一次性登录码（mock 是固定码，参考实现是真码）。 */
-const mintCode = async () => {
-    if (SERVER_MODE !== "reference") return "123456";
-    const response = await fetch(`http://127.0.0.1:${API_PORT}/api/internal/login-code`, {
-        method: "POST",
-        headers: {"Content-Type": "application/json", "X-Bot-Secret": BOT_SECRET},
-        body: JSON.stringify({qq: "39360001"}),
-    });
-    if (!response.ok) throw new Error("取登录码失败: " + response.status);
-    return (await response.json()).code;
-};
+const api = (path, options = {}) => fetch(`http://127.0.0.1:${API_PORT}${path}`, {
+    ...options,
+    headers: {"Content-Type": "application/json", ...(options.headers || {})},
+});
 
-function stopAll() {
-    for (const child of started) { try { child.kill(); } catch { /* 忽略 */ } }
-}
-
-const cloudState = page => page.evaluate(() => {
-    const panel = document.querySelector("#cloudPanel");
+const pageState = page => page.evaluate(() => {
+    const root = document.getElementById("cloudRoot");
+    const text = sel => root?.querySelector(sel)?.textContent.trim() ?? null;
     return {
-        present: !!panel,
-        open: !!panel?.querySelector("#cloudDetails")?.open,
-        state: panel?.querySelector("#cloudState")?.textContent.trim(),
-        msg: panel?.querySelector("#cloudMsg")?.textContent.trim(),
-        error: !!panel?.querySelector("#cloudMsg.cloud-error"),
-        items: [...(panel?.querySelectorAll(".cloud-item") || [])].map(li => ({
-            title: li.querySelector("b")?.textContent.trim(),
-            load: !!li.querySelector("[data-cloud-load]"),
-        })),
-        loggedIn: !!panel?.querySelector("#cloudLogout"),
+        configured: !!root?.querySelector("#cloudServerLine"),
+        serverLine: text("#cloudServerLine"),
+        authVisible: !!root?.querySelector("#cloudAuthBox") && !root.querySelector("#cloudAuthBox").hidden,
+        accountVisible: !!root?.querySelector("#cloudAccountBox") && !root.querySelector("#cloudAccountBox").hidden,
+        loginVisible: !!root?.querySelector("#cloudSubmit"),
+        submitLabel: text("#cloudSubmit"),
+        accountName: text(".cloud-account-name"),
+        accountLine: text(".cloud-account-row .cloud-dim"),
+        msg: text("#cloudMsg"),
+        error: !!root?.querySelector("#cloudMsg.cloud-error"),
+        badge: document.getElementById("cloudBadge")?.textContent.trim() ?? null,
+        results: [...(root?.querySelectorAll("#cloudResultsBox .cloud-item") || [])]
+            .map(li => li.querySelector("b")?.textContent.trim()),
+        profileLine: root?.querySelector("#cloudProfileBox p.cloud-dim")?.textContent.replace(/\s+/g, " ").trim() ?? null,
+        bindOpen: !document.getElementById("cloudBindOverlay")?.hidden,
+        bindBody: document.getElementById("cloudBindBody")?.textContent.replace(/\s+/g, " ").trim() ?? "",
+        bindCode: document.querySelector(".cloud-code")?.textContent.trim() ?? null,
+        hasCopyButton: !!document.getElementById("cloudCopyCmd"),
     };
 });
 
-const cardState = page => page.evaluate(() => {
-    const panel = document.querySelector("#b25Root .b25-panel");
-    return {
-        count: panel ? panel.querySelectorAll(".b25-card").length : 0,
-        rating: panel?.querySelector(".b25-rating strong")?.textContent.trim() || null,
-        empty: !!document.querySelector("#b25Root .b25-empty"),
-        firstName: panel?.querySelector(".b25-card .b25-title")?.textContent.trim() || null,
-    };
-});
+const appState = page => page.evaluate(() => ({
+    owned: document.getElementById("ownedCount")?.textContent.trim() ?? null,
+    cardCount: document.querySelectorAll("#b25Root .b25-card").length,
+    b25Empty: !!document.querySelector("#b25Root .b25-empty"),
+    badge: document.getElementById("cloudBadge")?.textContent.trim() ?? null,
+}));
 
-const openApp = async (context, {apiBase = API_BASE} = {}) => {
+async function openApp(context, {apiBase = API_BASE, base = BASE} = {}) {
     const page = await context.newPage();
-    const bad = [];
-    const apiCalls = [];
-    page.on("response", r => { if (r.status() >= 400) bad.push(`${r.status()} ${r.url()}`); });
+    const bad = [], calls = [];
+    page.on("response", r => {
+        const url = r.url();
+        if (r.status() >= 400 && !url.includes("/cloud-api/api/internal/")) bad.push(`${r.status()} ${url}`);
+    });
     page.on("console", m => { if (m.type() === "error") bad.push("console: " + m.text().slice(0, 200)); });
     page.on("pageerror", e => bad.push("pageerror: " + String(e.message).slice(0, 200)));
-    page.on("request", r => { if (r.url().includes("/cloud-api/")) apiCalls.push(r.url()); });
-    await page.addInitScript(base => {
-        if (base === null) localStorage.removeItem("ournotes-cloud-api-base");
-        else localStorage.setItem("ournotes-cloud-api-base", base);
+    page.on("request", r => { if (r.url().includes("/cloud-api/") || r.url().includes("/api/")) calls.push(r.url()); });
+    await page.addInitScript(value => {
+        if (value === null) localStorage.removeItem("ournotes-cloud-api-base");
+        else localStorage.setItem("ournotes-cloud-api-base", value);
     }, apiBase);
-    await page.goto(BASE, {waitUntil: "domcontentloaded"});
+    await page.goto(base, {waitUntil: "domcontentloaded"});
     await page.waitForFunction(() => window.PlannerAccount?.current?.(), null, {timeout: 180000});
-    return {page, bad, apiCalls};
+    await page.waitForSelector("#cloudBadge", {timeout: 20000});
+    return {page, bad, calls};
+}
+
+const gotoCloud = async page => {
+    await page.locator('.tabs button[data-tab="cloud"]').click();
+    await page.waitForSelector("#cloudRoot .cloud-panel-open", {timeout: 20000});
+    await page.waitForTimeout(300);
 };
 
-const gotoB25 = async page => {
-    await page.locator('[data-tab="b25"]').click();
-    await page.waitForSelector("#b25Root .b25-panel, #b25Root .b25-empty", {timeout: 20000});
-    await page.waitForSelector("#cloudPanel #cloudDetails", {timeout: 20000});
-};
-
-const setPanel = async (page, selector, value) => {
-    await page.locator("#cloudPanel #cloudDetails").evaluate(el => { el.open = true; });
-    await page.fill(selector, value);
-};
-
-const clickAndSettle = async (page, selector) => {
+const fill = (page, selector, value) => page.fill(selector, value);
+const click = async (page, selector, settle = 700) => {
     await page.locator(selector).click();
-    // 面板里的操作都是「发请求 → 改状态 → 重画」，等状态稳定下来
-    await page.waitForTimeout(600);
-};
-
-/** 等到面板上的提示语满足条件（网络失败、代理 502 都要等一小会儿）。 */
-const waitForMessage = async (page, pattern, timeout = 6000) => {
-    const deadline = Date.now() + timeout;
-    let last = null;
-    while (Date.now() < deadline) {
-        last = await cloudState(page);
-        if (pattern.test(last.msg)) return last;
-        await page.waitForTimeout(250);
-    }
-    return last;
+    await page.waitForTimeout(settle);
 };
 
 (async () => {
     if (!fs.existsSync(SAMPLE)) { console.error("缺少样本包:", SAMPLE); process.exit(1); }
     fs.mkdirSync(SHOT_DIR, {recursive: true});
+    // 默认**不构建**：验收要验的是「已经构建好的那份产物」。
+    // 想让它顺手构建就设 CLOUD_CHECK_BUILD=1（本地开发时方便）。
+    if (process.env.CLOUD_CHECK_BUILD === "1") {
+        console.log("构建 dist …");
+        const build = spawn(PYTHON, ["-B", "browser/build_browser.py", "--build"], {cwd: ROOT, stdio: "inherit"});
+        await new Promise((resolve, reject) => build.on("exit", code => code === 0 ? resolve() : reject(new Error("构建失败"))));
+    } else if (!fs.existsSync(path.join(ROOT, "browser/dist/index.html"))) {
+        console.error("browser/dist 还没有构建：先跑 python -B browser/build_browser.py --build");
+        process.exit(1);
+    }
 
-    let mock, preview, browser;
+    let browser;
     try {
-        if (SERVER_MODE === "reference") {
-            const dbPath = path.join(ROOT, "work/cloud-check/reference-api.db");
-            for (const suffix of ["", "-wal", "-shm"]) fs.rmSync(dbPath + suffix, {force: true});
-            mock = await launch(PYTHON, [REFERENCE_SERVER], "ournotes api on",
-                {ON_API_PORT: String(API_PORT), ON_API_DB: dbPath, ON_BOT_SECRET: BOT_SECRET});
-            check(true, "起的是**参考实现**（文档 §9 的 Python 后端）", path.relative(ROOT, REFERENCE_SERVER));
+        await launch(process.execPath, [path.join(__dirname, "mock_account_api.cjs"), String(API_PORT)], "mock account api:");
+        await launch(PYTHON, ["-B", path.join(__dirname, "preview_server.py"),
+            "--port", String(PREVIEW_PORT), "--api-proxy", `http://127.0.0.1:${API_PORT}`], "Static preview:");
+        check(true, "替身后端 + 预览服务器已起", `:${API_PORT} ← ${API_BASE} ← :${PREVIEW_PORT}`);
+
+        browser = await chromium.launch({headless: true, channel: process.env.OURNOTES_BROWSER_CHANNEL || "msedge"});
+
+        // ---- ① 未配置后端：零请求零报错 ----
+        // 交付给服务器的那份构建自带「同源」meta，这时「未配置」这条不适用（第 10 条会验它）。
+        const builtHtml = fs.readFileSync(path.join(ROOT, "browser/dist/index.html"), "utf8");
+        const builtMeta = /<meta name="ournotes-api-base" content="([^"]*)"/.exec(builtHtml);
+        console.log("\n[1] 没有后端时（公开镜像站）");
+        if (builtMeta) {
+            console.log("   [SKIP] 这份构建注入了 api-base（交付构建），改由第 10 条验证同源形态");
         } else {
-            mock = await launch(process.execPath, [path.join(__dirname, "mock_api_server.cjs"), String(API_PORT)],
-                "mock api:");
+            const offlineCtx = await browser.newContext({viewport: {width: 1280, height: 1000}});
+            const off = await openApp(offlineCtx, {apiBase: null});
+            await gotoCloud(off.page);
+            let st = await pageState(off.page);
+            check(/未启用/.test(st.serverLine || ""), "显示「未启用」并给出官方站点", st.serverLine);
+            check(off.calls.length === 0, "一个请求都没发", off.calls.length + " 次");
+            check(off.bad.length === 0, "没有控制台报错", off.bad.slice(0, 3).join(" | "));
+            await offlineCtx.close();
         }
-        preview = await launch(PYTHON, ["-B", path.join(__dirname, "preview_server.py"),
-            "--port", String(PREVIEW_PORT), "--api-proxy", `http://127.0.0.1:${API_PORT}`],
-            "Static preview:");
-        check(true, "替身服务器 + 预览服务器已起", `:${API_PORT} ← ${API_BASE} ← :${PREVIEW_PORT}`);
 
-        browser = await chromium.launch({headless: true,
-            channel: process.env.OURNOTES_BROWSER_CHANNEL || "msedge"});
+        // ---- ② 注册 → 自动登录 ----
+        console.log("\n[2] 注册 → 自动登录");
+        const ctxA = await browser.newContext({viewport: {width: 1280, height: 1000}});
+        const a = await openApp(ctxA);
+        await gotoCloud(a.page);
+        st = await pageState(a.page);
+        check(st.loginVisible, "默认显示登录表单", st.submitLabel);
+        await click(a.page, '[data-cloud-view="register"]');
+        st = await pageState(a.page);
+        check(/注册/.test(st.submitLabel || ""), "切到注册模式", st.submitLabel);
 
-        // ---- ① 未配置：一个请求都不发 ----
-        console.log("\n[1] 没配服务器地址时（公开站点的默认状态）");
-        const offlineCtx = await browser.newContext({viewport: {width: 1280, height: 900}});
-        const a0 = await openApp(offlineCtx, {apiBase: null});
-        await gotoB25(a0.page);
-        const off = await cloudState(a0.page);
-        check(off.present, "B25 页上有云端面板");
-        check(off.state === "未配置", "状态显示未配置", off.state);
-        check(a0.apiCalls.length === 0, "没有向服务器发任何请求", a0.apiCalls.length + " 次");
-        check(a0.bad.length === 0, "没有控制台报错", a0.bad.slice(0, 3).join(" | "));
-        await offlineCtx.close();
+        await fill(a.page, "#cloudUsername", USERNAME);
+        await fill(a.page, "#cloudPassword", "short");
+        await click(a.page, "#cloudSubmit");
+        st = await pageState(a.page);
+        check(st.error && /至少 8 位/.test(st.msg || ""), "密码太短被前端挡下", st.msg);
 
-        // ---- ②③ 导入账号包 → 登录 → 上传 ----
-        console.log("\n[2] 导入账号包并登录");
-        const deviceA = await browser.newContext({viewport: {width: 1280, height: 900}});
-        const a = await openApp(deviceA);
+        await fill(a.page, "#cloudPassword", PASSWORD);
+        await click(a.page, "#cloudSubmit", 1200);
+        st = await pageState(a.page);
+        check(st.accountVisible && st.accountName === USERNAME, "注册后直接进账号区", st.accountName);
+        check(/未绑定 QQ/.test(st.accountLine || ""), "显示未绑定 QQ", st.accountLine);
+        check(/karen_|^\S+$/.test(st.badge || ""), "头部标识变成用户名", st.badge);
+        const tokenA = await a.page.evaluate(() => localStorage.getItem("ournotes-cloud-token"));
+        check(!!tokenA, "token 已存进 localStorage");
+
+        // ---- ③ 刷新后仍是登录态 ----
+        console.log("\n[3] 刷新后仍是登录态");
+        await a.page.reload({waitUntil: "domcontentloaded"});
+        await a.page.waitForFunction(() => window.PlannerAccount?.current?.(), null, {timeout: 120000});
+        await gotoCloud(a.page);
+        st = await pageState(a.page);
+        check(st.accountVisible, "刷新后直接是已登录", st.accountName);
+        check(a.calls.some(u => u.includes("/api/me")), "启动时调过 GET /api/me");
+        check(a.calls.every(u => !/[?&]token=/.test(u)), "token 从未出现在 URL 里");
+
+        // ---- ④ 绑定 QQ ----
+        console.log("\n[4] 绑定 QQ（含发错 QQ 不消耗码）");
+        await click(a.page, "#cloudBind");
+        st = await pageState(a.page);
+        check(st.bindOpen, "弹出绑定窗口");
+        await fill(a.page, "#cloudBindQq", "abc");
+        await click(a.page, "#cloudBindStart");
+        st = await pageState(a.page);
+        check(st.error && /QQ 号看起来不对/.test(st.msg || ""), "非法 QQ 被前端挡下", st.msg);
+
+        await fill(a.page, "#cloudBindQq", QQ);
+        await click(a.page, "#cloudBindStart", 900);
+        st = await pageState(a.page);
+        const code = st.bindCode;
+        check(!!code && /^\d{6}$/.test(code), "拿到 6 位绑定码（按字符串处理）", code);
+        check(st.hasCopyButton && /一键复制命令/.test(st.bindBody || ""), "有「一键复制命令」和三步说明");
+        check(st.bindBody.includes(`/on绑定网页 ${code}`), "命令文案正确");
+
+        const wrong = await (await api("/api/internal/bind", {
+            method: "POST", body: JSON.stringify({code, qq: WRONG_QQ})})).json();
+        check(/不是发给这个 QQ/.test(wrong.message || ""), "用别的 QQ 发被拒", wrong.message);
+        await a.page.waitForTimeout(3500);                  // 让它轮询一轮
+        st = await pageState(a.page);
+        check(st.bindOpen && !st.error && /等待中/.test(st.bindBody || ""),
+            "被拒后页面仍在等待（码没被消耗）", st.bindBody.slice(-40));
+
+        const right = await (await api("/api/internal/bind", {
+            method: "POST", body: JSON.stringify({code, qq: QQ})})).json();
+        check(right.ok === true, "用本人 QQ 发 → 机器人侧绑定成功", JSON.stringify(right));
+        await a.page.waitForFunction(() => /已绑定 QQ/.test(document.querySelector("#cloudRoot .cloud-account-row .cloud-dim")?.textContent || ""),
+            null, {timeout: 15000});
+        await click(a.page, "#cloudBindClose");
+        st = await pageState(a.page);
+        check(/已绑定 QQ 44008952/.test(st.accountLine || ""), "轮询把界面更新成「已绑定」", st.accountLine);
+
+        // ---- ⑤ 成绩卡结果：上传 → 换设备可见 → 删除 ----
+        console.log("\n[5] 成绩卡：上传 → 换设备取回 → 删除");
         await a.page.locator('[data-tab="account"]').click();
         await a.page.waitForSelector("#accountImportRoot #accountDrop", {timeout: 60000});
         await a.page.setInputFiles("#accountImportRoot input[type=file]:not([webkitdirectory])", SAMPLE);
         await a.page.waitForSelector("#accountB25 .b25-teaser", {timeout: 180000});
-        await gotoB25(a.page);
-        const local = await cardState(a.page);
-        check(local.count === 25, "本机卡片已生成（25 张）", local.count);
-        const aState = await cloudState(a.page);
-        check(aState.state === "未登录", "地址已配置、还没登录", aState.state);
 
-        await setPanel(a.page, "#cloudPanel #cloudCode", "000000");
-        await clickAndSettle(a.page, "#cloudPanel #cloudLogin");
-        let st = await cloudState(a.page);
-        check(st.error && /登录码/.test(st.msg), "错的登录码被挡下并有提示", st.msg);
-        check(!st.loggedIn, "没有登录成功");
+        // 顺手塞一个敏感字段：客户端**自己**就该剔掉（红线）
+        await a.page.evaluate(() => {
+            const key = Object.keys(localStorage).find(k => k.startsWith("ournotes-b25-v1"));
+            const record = JSON.parse(localStorage.getItem(key));
+            record.raw = {access_key: "SHOULD-NEVER-UPLOAD", id_token: "nope"};
+            localStorage.setItem(key, JSON.stringify(record));
+        });
+        await gotoCloud(a.page);
+        await click(a.page, "#cloudUploadCard", 1500);
+        st = await pageState(a.page);
+        check(/已存到云端/.test(st.msg || ""), "成绩卡已上传", st.msg);
+        check(/已自动移除 2 项敏感字段/.test(st.msg || ""), "客户端自己剔除了敏感字段", st.msg);
+        check(st.results.some(t => /B25 成绩/.test(t)), "列表里出现这条成绩卡", st.results.join(" / "));
+        const tokenA2 = await a.page.evaluate(() => localStorage.getItem("ournotes-cloud-token"));
+        const serverList = await (await api("/api/results", {headers: {Authorization: "Bearer " + tokenA2}})).json();
+        const stored = await (await api("/api/results/" + serverList[0].id,
+            {headers: {Authorization: "Bearer " + tokenA2}})).json();
+        check(!JSON.stringify(stored.payload).includes("SHOULD-NEVER-UPLOAD"),
+            "服务器上那份不含敏感值（上传前已剔除）");
 
-        await setPanel(a.page, "#cloudPanel #cloudCode", await mintCode());
-        await clickAndSettle(a.page, "#cloudPanel #cloudLogin");
-        st = await cloudState(a.page);
-        check(st.loggedIn && /已登录/.test(st.state), "正确登录码登录成功", st.state);
+        console.log("\n[5b] 换设备登录同账号可见");
+        const ctxB = await browser.newContext({viewport: {width: 1280, height: 1000}});
+        const b = await openApp(ctxB);
+        await gotoCloud(b.page);
+        await fill(b.page, "#cloudUsername", USERNAME);
+        await fill(b.page, "#cloudPassword", PASSWORD);
+        await click(b.page, "#cloudSubmit", 1200);
+        await click(b.page, "#cloudRefresh", 900);
+        st = await pageState(b.page);
+        check(st.results.length >= 1, "新设备看到云端那条成绩卡", st.results.length);
+        await click(b.page, "#cloudResultsBox [data-cloud-load]", 1200);
+        const b25 = await b.page.evaluate(() => {
+            const key = Object.keys(localStorage).find(k => k.startsWith("ournotes-b25-v1"));
+            return key ? JSON.parse(localStorage.getItem(key)).entries.length : 0;
+        });
+        check(b25 === 25, "取回后本机还原出 25 张卡", b25);
+        await b.page.locator('[data-tab="b25"]').click();
+        await b.page.waitForSelector("#b25Root .b25-card", {timeout: 15000});
+        const cards = await b.page.evaluate(() => document.querySelectorAll("#b25Root .b25-card").length);
+        check(cards === 25, "B25 页渲染 25 张卡", cards);
 
-        console.log("\n[3] 把当前卡片存到云端");
-        await clickAndSettle(a.page, "#cloudPanel #cloudUpload");
-        st = await cloudState(a.page);
-        check(/已存到云端/.test(st.msg), "上传成功", st.msg);
-        check(st.items.length === 1, "云端列表里有 1 条", st.items.length);
-        check(/B25 成绩/.test(st.items[0]?.title || ""), "标题是人话", st.items[0]?.title);
-        const token = await a.page.evaluate(() => localStorage.getItem("ournotes-cloud-token"));
-        const onServer = await (await fetch(`http://127.0.0.1:${API_PORT}/api/results`, {
-            headers: {Authorization: "Bearer " + token}})).json();
-        check(onServer.length === 1 && onServer[0].size < 256 * 1024,
-            "服务器上确实存下了（体积远小于 256 KB）", `${onServer.length} 条 / ${onServer[0]?.size} 字节`);
-        const stored = await (await fetch(`http://127.0.0.1:${API_PORT}/api/results/${onServer[0].id}`, {
-            headers: {Authorization: "Bearer " + token}})).json();
-        // 「不含原始账号包」看的是**结构**：不能有游戏模型的 _xxx 字段，体积也不该是账号包那个量级。
-        // （提示语正文里出现 `_liveMusicResults` 这种词是文案，不算数据。）
-        const topKeys = Object.keys(stored.payload || {});
-        check(!topKeys.some(k => k.startsWith("_")) && onServer[0].size < 64 * 1024
-              && stored.payload.entries?.length === 25,
-            "上传的是卡片结果（无游戏模型字段，约 10 KB，不是 3 MB 的账号包）",
-            `${topKeys.length} 个字段 / ${onServer[0].size} 字节`
-            + ` / entries ${stored.payload.entries.length}`
-            + ` / notes ${(stored.payload.notes || []).length} 条 ${(stored.payload.notes || []).join("").length} 字`
-            + ` / 本地序列化 ${Buffer.byteLength(JSON.stringify(stored.payload))} 字节`);
-        check(stored.payload.entries?.length === 25, "结果里就是那 25 张卡", stored.payload.entries?.length);
-        await a.page.locator("#b25Root .b25-panel").screenshot({path: path.join(SHOT_DIR, "device-a.png")});
+        // ---- ⑥ 卡库云同步 ----
+        console.log("\n[6] 卡库云同步（本机改卡库 → 上传 → 换设备恢复）");
+        await a.page.locator('[data-tab="inventory"]').click();
+        await a.page.waitForSelector("#ownedCount", {timeout: 20000});
+        // 浏览器版出厂是**空卡库**（demo 按钮是隐藏的），所以先用应用自己的卡池塞一张卡进去，
+        // 否则「恢复成功」是空对空、测不出东西。
+        const seeded = await a.page.evaluate(async () => {
+            const bootstrap = await (await window.plannerFetch("/api/bootstrap")).json();
+            const document_ = window.PlannerProfile.document();
+            const memberId = bootstrap.catalog.members[0].id;
+            const snapId = bootstrap.catalog.snaps[0].id;
+            document_.name = "云同步测试卡库";
+            document_.is_demo = false;
+            document_.profile.inventory.members = [{id: memberId, level: 20, training_count: 0,
+                awakening_count: 0, live_skill_level: 1, gekisou_skill_level: 1}];
+            document_.profile.inventory.snaps = [{id: snapId, level: 20, limit_break_count: 0}];
+            document_.candidate_member_ids = [memberId];
+            document_.candidate_snap_ids = [snapId];
+            return window.PlannerProfile.install(document_);
+        });
+        check(seeded === true, "通过卡库桥塞进 1 张成员卡 + 1 张留影卡");
+        await a.page.waitForTimeout(800);
+        const sourceOwned = await a.page.evaluate(() => document.getElementById("ownedCount").textContent.trim());
+        const sourceName = await a.page.evaluate(() => document.getElementById("profileName").textContent.trim());
+        check(sourceOwned === "1 + 1" && sourceName === "云同步测试卡库",
+            "A 设备卡库已是非空且可辨认", `${sourceName} · ${sourceOwned}`);
+        await gotoCloud(a.page);
+        await click(a.page, "#cloudProfilePush", 1500);
+        st = await pageState(a.page);
+        check(/卡库已上传/.test(st.msg || "") || /已同步/.test(st.profileLine || ""),
+            "卡库已上传", st.msg + " | " + st.profileLine);
 
-        // ---- ④ 换设备取回 ----
-        console.log("\n[4] 换一台设备（全新浏览器上下文）取回");
-        const deviceB = await browser.newContext({viewport: {width: 1280, height: 900}});
-        const b = await openApp(deviceB, {apiBase: null});     // 这台设备连地址都还没配
-        await gotoB25(b.page);
-        const fresh = await cardState(b.page);
-        check(fresh.empty, "新设备上没有本地卡片（是空状态）");
-        let bs = await cloudState(b.page);
-        check(bs.state === "未配置", "新设备一开始也是未配置", bs.state);
-        // 用界面上的「服务器地址 + 保存」把地址配上（顺便测这条路径）
-        await setPanel(b.page, "#cloudPanel #cloudBase", API_BASE);
-        await clickAndSettle(b.page, "#cloudPanel #cloudSaveBase");
-        bs = await cloudState(b.page);
-        check(bs.state === "未登录", "保存地址后变成未登录", bs.state);
-        await setPanel(b.page, "#cloudPanel #cloudCode", await mintCode());
-        await clickAndSettle(b.page, "#cloudPanel #cloudLogin");
-        await clickAndSettle(b.page, "#cloudPanel #cloudRefresh");
-        st = await cloudState(b.page);
-        check(st.items.length === 1 && st.items[0].load, "云端列表可见且可取回", st.items.length);
-        await clickAndSettle(b.page, "#cloudPanel [data-cloud-load]");
-        const restored = await cardState(b.page);
-        st = await waitForMessage(b.page, /已取回/);
-        check(/已取回/.test(st.msg), "取回成功（提示语在卡片重画后仍然在）", st.msg);
-        check(restored.count === 25, "新设备上还原出 25 张卡", restored.count);
-        check(restored.rating === local.rating, "Rating 与本机一致",
-            `${local.rating} -> ${restored.rating}`);
-        check(restored.firstName === local.firstName, "第 1 名一致",
-            `${local.firstName} -> ${restored.firstName}`);
-        await b.page.locator("#b25Root .b25-panel").screenshot({path: path.join(SHOT_DIR, "device-b.png")});
-        check(b.bad.length === 0, "新设备上没有控制台报错", b.bad.slice(0, 3).join(" | "));
+        await gotoCloud(b.page);
+        await click(b.page, "#cloudProfileList", 1200);
+        st = await pageState(b.page);
+        const profileButton = await b.page.locator("[data-cloud-profile]").count();
+        check(profileButton >= 1, "新设备能看到云端卡库", profileButton);
+        b.page.once("dialog", dialog => dialog.accept());
+        await click(b.page, "[data-cloud-profile]", 1500);
+        await b.page.locator('[data-tab="inventory"]').click();
+        await b.page.waitForTimeout(800);
+        const restoredOwned = await b.page.evaluate(() => document.getElementById("ownedCount").textContent.trim());
+        const restoredName = await b.page.evaluate(() => document.getElementById("profileName").textContent.trim());
+        check(restoredOwned === sourceOwned, "恢复后卡库一致（已录入卡数相同）", `${sourceOwned} -> ${restoredOwned}`);
+        check(restoredName === sourceName, "卡库名也一致", `${sourceName} -> ${restoredName}`);
 
-        // ---- ⑤ 覆盖更新 / 版本冲突 ----
-        console.log("\n[5] 覆盖更新与版本冲突");
-        await clickAndSettle(a.page, "#cloudPanel #cloudUpload");
-        st = await cloudState(a.page);
-        check(/已覆盖云端那条结果/.test(st.msg), "第二次上传走「覆盖更新」（PUT）", st.msg);
-        const after = await (await fetch(`http://127.0.0.1:${API_PORT}/api/results`, {
-            headers: {Authorization: "Bearer " + token}})).json();
-        check(after.length === 1, "仍然只有 1 条（没有重复堆积）", after.length);
-        const conflict = await fetch(`http://127.0.0.1:${API_PORT}/api/results/${after[0].id}`, {
-            method: "PUT",
-            headers: {Authorization: "Bearer " + token, "Content-Type": "application/json"},
-            body: JSON.stringify({payload: {entries: [1]}, version: 1})});
-        const conflictBody = await conflict.json();
-        check(conflict.status === 409 && conflictBody.error === "conflict",
-            "拿旧版本号写回会被 409 挡住", `${conflict.status} ${conflictBody.error}`);
+        // ---- ⑦ 改密：旧 token 立刻失效 ----
+        console.log("\n[7] 修改密码 → 旧 token 失效");
+        await gotoCloud(a.page);
+        await click(a.page, "#cloudChangePw");
+        await fill(a.page, "#cloudOldPw", PASSWORD);
+        await fill(a.page, "#cloudNewPw", "1234");
+        await click(a.page, "#cloudChangePwGo", 1000);
+        st = await pageState(a.page);
+        check(st.error && /至少 8 位/.test(st.msg || ""), "新密码太短被挡", st.msg);
+        await fill(a.page, "#cloudNewPw", NEW_PASSWORD);
+        await click(a.page, "#cloudChangePwGo", 1500);
+        st = await pageState(a.page);
+        check(st.loginVisible, "改密 204 后回到登录表单", st.submitLabel);
+        check(await a.page.evaluate(() => localStorage.getItem("ournotes-cloud-token")) === null,
+            "本地 token 已清掉");
+        const stale = await api("/api/me", {headers: {Authorization: "Bearer " + tokenA2}});
+        check(stale.status === 401, "旧 token 在服务端已失效（401）", stale.status);
 
-        // ---- ⑥ 服务器挂掉 ----
-        console.log("\n[6] 服务器挂掉时不能影响本地");
-        mock.kill();
-        await new Promise(r => setTimeout(r, 400));
-        await clickAndSettle(a.page, "#cloudPanel #cloudRefresh");
-        st = await waitForMessage(a.page, /连不上|服务器|upstream|超时/);
-        const stillThere = await cardState(a.page);
-        check(st.error, "面板上给出错误提示", st.msg.slice(0, 80) || "(没有提示)");
-        check(stillThere.count === 25, "本地卡片照常显示 25 张", stillThere.count);
-        // 前面「错的登录码」本来就会产生一次 401，那是**预期内**的，不当作报错
-        const unexpected = a.bad.filter(t => !/Failed to load resource|502|ERR_|401 .*\/api\/login/.test(t));
-        check(unexpected.length === 0, "除了预期的网络失败/401，没有别的报错",
-            unexpected.slice(0, 2).join(" | "));
+        // ---- ⑧ 503 限流 ----
+        console.log("\n[8] nginx 限流 503（HTML）处理");
+        await fill(a.page, "#cloudUsername", USERNAME);
+        await fill(a.page, "#cloudPassword", NEW_PASSWORD);
+        await click(a.page, "#cloudSubmit", 1500);
+        st = await pageState(a.page);
+        check(st.accountVisible, "新密码可以登录", st.accountName);
 
-        await offlineCtx.close?.(); await deviceA.close(); await deviceB.close();
+        await api("/api/internal/status503", {method: "POST", body: JSON.stringify({count: 1})});
+        await click(a.page, "#cloudRefresh", 3000);
+        st = await pageState(a.page);
+        check(!st.error && st.results.length >= 1, "遇到 1 个 503 会退避重试并成功", st.msg);
+
+        await api("/api/internal/status503", {method: "POST", body: JSON.stringify({count: 3})});
+        await click(a.page, "#cloudRefresh", 4000);
+        st = await pageState(a.page);
+        check(st.error && /太快|限流/.test(st.msg || ""), "连续 503 给出「操作太快」提示", st.msg);
+
+        // ---- ⑨ token 失效后自动回登录页 ----
+        console.log("\n[9] token 被服务端清掉后自动回登录页");
+        await a.page.evaluate(() => localStorage.setItem("ournotes-cloud-token", "t_bogus_token_value"));
+        await a.page.reload({waitUntil: "domcontentloaded"});
+        await a.page.waitForFunction(() => window.PlannerAccount?.current?.(), null, {timeout: 120000});
+        await gotoCloud(a.page);
+        // 有 token 时会先显示「正在校验登录态」，等它落到登录表
+        await a.page.waitForFunction(() => !!document.querySelector("#cloudRoot #cloudSubmit"), null, {timeout: 20000})
+            .catch(() => {});
+        st = await pageState(a.page);
+        check(st.loginVisible, "无效 token 被清掉并显示登录表单", st.submitLabel);
+        check(await a.page.evaluate(() => localStorage.getItem("ournotes-cloud-token")) === null, "本地 token 已清空");
+
+        await a.page.screenshot({path: path.join(SHOT_DIR, "account-page.png")});
+        // 预期噪音：① 故意造出来的 401/503；② **测试夹具**缺几张卡面导致的图片 404
+        //（app 自带重试，另有 check_images.cjs 覆盖）—— 都不是这次改动的问题
+        const noise = t => /401/.test(t) || /503/.test(t)
+            || /(card-images|avatar-images|jacket-images|ui-images)\/.*\.webp/.test(t)
+            || /Failed to load resource.*(404|503)/.test(t);
+        check(a.bad.filter(t => !noise(t)).length === 0, "A 设备除预期的 401/夹具缺图外没有报错",
+            a.bad.filter(t => !noise(t)).slice(0, 3).join(" | "));
+        check(b.bad.filter(t => !noise(t)).length === 0, "B 设备除预期的 401/夹具缺图外没有报错",
+            b.bad.filter(t => !noise(t)).slice(0, 3).join(" | "));
+
+        await ctxA.close(); await ctxB.close();
+
+        // ---- ⑩ 交付给服务器的那份产物：构建期注入「同源空串」，apiBase='' ------------------
+        // 只有带 <meta name="ournotes-api-base" content=""> 的构建才跑这条（GitHub Pages 镜像没有）。
+        console.log("\n[10] 交付产物（同源 apiBase）");
+        const meta = builtMeta;
+        if (!meta) {
+            console.log("   [SKIP] 这份构建没有注入 api-base（镜像站构建），跳过");
+        } else if (meta[1] !== "") {
+            check(false, "同源构建里 api-base 必须是空串", meta[1]);
+        } else {
+            // 同一份 dist，另起一个预览把 `/api` 也代理到替身后端（模拟 on.tabsac.com 的同源形态）。
+            // ⚠️ 代理会**去掉** `--api-prefix`，所以上游 base 要带 `/api`，否则 `/api/register` 会被转成 `/register`。
+            const sameOriginPort = PREVIEW_PORT + 1;
+            await launch(PYTHON, ["-B", path.join(__dirname, "preview_server.py"),
+                "--port", String(sameOriginPort), "--api-proxy", `http://127.0.0.1:${API_PORT}/api`,
+                "--api-prefix", "/api"], "Static preview:");
+            const ctxC = await browser.newContext({viewport: {width: 1280, height: 1000}});
+            // 注意要打开**同源预览那个端口**（8880），否则请求还是打到 8879 的前缀代理上
+            const c = await openApp(ctxC, {
+                apiBase: null,      // 不碰 localStorage，用构建注入的值
+                base: `http://127.0.0.1:${sameOriginPort}/ournotes-planner/`,
+            });
+            await gotoCloud(c.page);
+            let sc = await pageState(c.page);
+            check(/同源/.test(sc.serverLine || ""), "面板认出「同源」后端", sc.serverLine);
+            await click(c.page, '[data-cloud-view="register"]');     // 默认是登录表，先切注册
+            await fill(c.page, "#cloudUsername", USERNAME + "_so");
+            await fill(c.page, "#cloudPassword", PASSWORD);
+            await click(c.page, "#cloudSubmit", 1500);
+            sc = await pageState(c.page);
+            check(sc.accountVisible, "同源模式下注册/登录直接可用（不需要任何地址配置）",
+                sc.accountName || `面板提示：${sc.msg || "(空)"}`
+                + ` | 请求：${c.calls.map(u => u.replace(`http://127.0.0.1:${sameOriginPort}`, "")).join(" ")}`
+                + ` | 4xx/5xx：${c.bad.slice(0, 3).join(" ; ")}`);
+            check(sc.badge && sc.badge !== "登录", "头部标识同步", sc.badge);
+            await ctxC.close();
+        }
     } catch (error) {
         console.error("!!! 失败:", error.message);
         problems.push("异常: " + error.message);
     } finally {
         if (browser) await browser.close().catch(() => {});
-        stopAll();
+        for (const child of started) { try { child.kill(); } catch { /* 忽略 */ } }
     }
     console.log(problems.length ? `\n${problems.length} 项未通过` : "\n全部通过");
     process.exit(problems.length ? 1 : 0);

@@ -596,3 +596,50 @@ a.button-link:hover {
 .cloud-note { margin: 2px 0 0; color: #8f8da8; line-height: 1.5; }
 .cloud-msg { margin: 0; min-height: 18px; color: #7ee0a8; }
 .cloud-msg.cloud-error { color: #ff9a9a; }
+
+/* ===== 「账号」页（cloud-ui.js）：登录/注册 + 账号区 + 结果 + 卡库同步 ===== */
+.cloud-panel-open { display: flex; flex-direction: column; gap: 12px; }
+.cloud-panel-open .cloud-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.cloud-panel-open h3 { margin: 0; font-size: 18px; }
+.cloud-panel-open h4 { margin: 0; font-size: 15px; }
+.cloud-card {
+    border: 1px solid rgba(255, 255, 255, .09); border-radius: 12px;
+    background: rgba(255, 255, 255, .03); padding: 12px 14px;
+    display: flex; flex-direction: column; gap: 9px;
+}
+.cloud-tabs { display: flex; gap: 6px; margin-bottom: 2px; }
+.cloud-tabs button.active { background: rgba(118, 103, 222, .35); border-color: rgba(118, 103, 222, .55); }
+.cloud-account-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.cloud-account-name { font-size: 16px; font-weight: 600; }
+.cloud-account-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.cloud-inline-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.cloud-panel-open a { color: #bdb2ff; }
+.cloud-error-text { color: #ff9a9a; margin: 0; }
+.cloud-steps { margin: 4px 0; padding-left: 20px; line-height: 1.7; }
+.cloud-code { font-size: 20px; letter-spacing: 3px; }
+.cloud-panel-open code { background: rgba(0, 0, 0, .3); padding: 1px 6px; border-radius: 6px; }
+.cloud-overlay {
+    position: fixed; inset: 0; background: rgba(8, 8, 14, .68);
+    display: flex; align-items: center; justify-content: center; z-index: 60;
+}
+.cloud-overlay[hidden] { display: none; }
+.cloud-dialog {
+    background: #1b1a26; border: 1px solid rgba(255, 255, 255, .12); border-radius: 14px;
+    padding: 18px 20px; max-width: 520px; width: calc(100% - 40px); display: flex; flex-direction: column; gap: 10px;
+}
+.cloud-dialog h3 { margin: 0; }
+.cloud-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.b25-cloud-bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-top: 10px; padding: 8px 12px; border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, .08); background: rgba(255, 255, 255, .03); font-size: 13px;
+}
+.b25-cloud-bar button {
+    padding: 4px 10px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .16);
+    background: rgba(255, 255, 255, .06); color: inherit; cursor: pointer;
+}
+.b25-cloud-bar button:disabled { opacity: .45; cursor: default; }
+.cloud-badge { cursor: pointer; }
+.cloud-badge[data-state="in"] { color: #7ee0a8; }
+.cloud-badge[data-state="off"] { opacity: .55; }
+

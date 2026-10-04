@@ -44,8 +44,10 @@ def verify(site):
         raise ValueError("A static file exceeds GitHub's individual file limit")
     html = (site / "index.html").read_text("utf-8")
     # 私密红线：本地构建可以带自己的 API 地址（browser/api-config.local.json），
-    # 但**发布了就等于把服务器地址写进公开仓库**。这里直接拦住。
-    if "ournotes-api-base" in html:
+    # 但**发布了就等于把服务器地址写进公开仓库**。这里拦住**绝对地址**；
+    # 空串 / 相对路径（同源部署，例如 on.tabsac.com 用 {"apiBase": ""}）不含任何地址，放行。
+    api_meta = re.search(r'<meta name="ournotes-api-base" content="([^"]*)"', html)
+    if api_meta and re.match(r"^https?://", api_meta.group(1)):
         raise ValueError("Site embeds a private API endpoint; rebuild without browser/api-config.local.json")
     for relative in re.findall(r'(?:src|href)="(\./assets/[^\"]+)"', html):
         if not (site / relative).is_file():

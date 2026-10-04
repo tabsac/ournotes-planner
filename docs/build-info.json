@@ -1,5 +1,5 @@
 {
-  "browser_version": "0.2.0",
+  "browser_version": "0.3.0",
   "core_version": "0.2.5",
   "public_source_sha256": "396a5b670f8e15f7ce3e5582ca9ed114658d40de801f9d7233351027888ca914",
   "runtime_sha256": "25892bf10a87e6898a641c0f536d694b367f8c9801f53a6831e68fd2d7b75916",
@@ -904,7 +904,7 @@
     "licenses/Pyodide-LICENSE.txt": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
     "licenses/source_manifest.json": "8122385e57c61cde89d53f2772c84fbb1f57274a42423443de765e7fb064ea5f",
     "planner-runtime.zip": "25892bf10a87e6898a641c0f536d694b367f8c9801f53a6831e68fd2d7b75916",
-    "service-worker.js": "7f00486cd230e58a56f3c2609288811c42344cc18b6aebb40bb14e6010b429fd",
+    "service-worker.js": "0a532405efe0789adb48bdafcd8a6ebda2565660658c5a6bf907112d587dc290",
     "static-data/b25-extra.json": "935559367616c2179841ccec7a27317bf02cbd047b7e2eae6917dd65b2fddea3",
     "THIRD-PARTY-NOTICES.txt": "ff69de836664f5dee3faa37e78124ac3b965792ba78e58c6ba69efb0ad6835c4",
     "ui-images/coin.webp": "ca9b13757f3dc877ebe29d4693c102c03e9f68fa4bf1bd713874532f0353ed93",
