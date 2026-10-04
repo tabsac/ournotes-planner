@@ -103,10 +103,17 @@ python -B browser/tests/preview_server.py --port 8877 --api-proxy https://on.tab
      如果只刷新页面，可能短暂看到上一次的「不一致」—— 按一次「重新检查」就回到一致。
      正规链路（服务器重建会同时更新 `contentDigests`）碰不到这条；真要根治就是「字节对不上的结论不入缓存」，
      留给下一版顺手做。
-   **仍然没做的是「把远端数据喂给 Python 求解」** —— 那要先解决门禁：
-   `upstream.json` 用 sha256 钉住公开源码与快照，验收 oracle 依赖它；
-   真要换成远端数据，得同时给出「数据版本 + 每文件 sha256」的验收口径（服务器侧已提供
-   `/data/version.json` 的 `fileDigests` / `contentDigests`，接口够用）。
+   **「把远端数据喂给求解」这一层分了两条路，选的是后者**：
+   * ~~运行期消费（求解器直接读 `/data`）~~ **不做**：求解输入必须确定，否则「同一份输入」随数据版本漂移，
+     而验收 oracle 是每次由 `browser/tests/make_fixtures.py` 从当前快照现算的，一漂就没意义。
+   * **✅ 构建期同步**（`tools/sync_snapshot_from_data.py`）：发布前把 `/data/*.json` 的
+     **谱面显示等级 / 定数 / 物量 + 活动窗口**同步进 `browser/snapshot-override/`（默认只报告，
+     `--write` 才写；先按字节校验 `fileDigests`；写回格式逐字节可复现，`git diff` 只显示真改的行）。
+     同步记录落在 `snapshot-override/data-sync.json`（来源 + `dataVersion` + 两类摘要 + 跳过了什么）。
+     回归测试 `browser/tests/check_snapshot_sync.py` 已进全量验收。
+   * **新歌仍不能自动跟上**：一首新歌还要谱面文件（note 数据）才算得出分，而 `/data/songs.json` 里没有
+     → 走 `python browser/update_snapshot.py --apply`（从游戏 CDN 拉全量表 + 谱面，需要本机凭据）。
+     要让它也自动化，得请服务器侧在 `/data` 里带上谱面数据（要重新谈契约）。
 2. **多设备冲突**：v0.3.2 补了选择框（用云端覆盖本机 / 保留本机另存）。仍可改进：
    冲突时显示「云端那版是什么时候、多少张卡」，便于用户判断选哪个。
 3. **忘记密码自助重置**：等机器人侧加命令（现在文案是「找管理员」）。

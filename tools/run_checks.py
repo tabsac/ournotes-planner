@@ -51,7 +51,7 @@ def load_mobile_evidence(browser_version):
 
 
 for name in ("check_power_modes.py", "make_fixtures.py", "make_extra_fixtures.py", "make_judgement_fixture.py",
-             "check_b25_selection.py"):
+             "check_b25_selection.py", "check_snapshot_sync.py"):
     run([sys.executable, "-B", str(ROOT / "browser/tests" / name), str(dest)])
 preview = subprocess.Popen([sys.executable, "-B", str(ROOT / "browser/tests/preview_server.py"), "--port", str(args.port)],
     cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

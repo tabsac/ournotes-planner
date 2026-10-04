@@ -1,5 +1,25 @@
 # 变更记录
 
+## 工具链 — 2026-10-05（网页产物未变，不占版本号）
+
+**新增构建期数据同步：把 `/data/*.json` 的游戏数据同步进内置快照。**（设计笔记 2p）
+
+- `tools/sync_snapshot_from_data.py`：拉 `/data/{version,songs,events}.json`，**先按字节校验
+  `fileDigests`**（不跟半写/坏数据同步），再与内置快照逐首 × 逐难度比**显示等级 / 定数 / 物量**
+  与活动窗口；默认**只读报告**（`0` 一致 / `1` 有差异 / `2` 遇到做不了的改动），`--write` 才写回
+  `snapshot-override/`，格式逐字节可复现（`git diff` 只显示真改的那几行），并记
+  `snapshot-override/data-sync.json`（来源 + `dataVersion` + `contentDigests`/`fileDigests` + 跳过了什么）。
+- **运行期仍然读内置快照**：求解输入必须确定 —— 验收 oracle 每次从当前快照现算，
+  运行期换成远端数据会让「同一份输入」随数据版本漂移。同步只在构建前发生。
+- **不做**：新增曲目（还缺谱面 note 数据，`/data` 里没有）→ 拒绝写入并指路
+  `browser/update_snapshot.py --apply`；`cards.json`（网页不用）。
+- `browser/tests/check_snapshot_sync.py` 进全量验收（18 项、不联网）：口径与构建期一致、
+  与构建产物的 `snapshot-digest.json` 逐首 87/87 一致、`diff_views` 四种情况、三张表写回逐字节相同、
+  坏数据必判 False。写这条测试时当场抓到「写回多加了一个结尾换行 → 每个文件差 1 字节」的真 bug。
+- 实测：对线上站点只读跑 → `✓ 完全一致（内置 87 首 / 线上 87 首）`；对替身后端 `mutate-data`
+  改一首 → 精确报「EXPERT 显示等级 25 → 26；EXPERT 物量 768 → 350」，`--write` 后
+  `git diff --stat` 恰好 `1 file changed, 2 insertions(+), 2 deletions(-)`。
+
 ## v0.3.2 — 2026-10-05
 
 **消费服务器的只读数据 `/data/*.json`（核对 + 陈旧提醒），并把卡库冲突的出路补上。**
