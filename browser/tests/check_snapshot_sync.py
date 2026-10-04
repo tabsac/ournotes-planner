@@ -130,6 +130,56 @@ check("取不到的文件（None）跳过", sync.verify_integrity(bad, (("events
 check("清单里没写 sha256 → 放行（无法校验≠不符）",
       all(item["ok"] for item in sync.verify_integrity({}, (("songs.json", payload),))))
 
+print("[6] apply_changes 端到端（在 work/ 下的**副本**里写，绝不碰真快照）")
+import shutil  # noqa: E402
+
+sandbox = ROOT / "work/snapshot-sync-test"
+if sandbox.exists():
+    shutil.rmtree(sandbox)
+shutil.copytree(raw_dir, sandbox)
+before = {p.name: p.read_bytes() for p in sandbox.glob("*.json")}
+scores_before = {row["_id"]: row for row in sync.load_table(raw_dir, "MasterLiveMusicScore")[1]}
+music_before = {row["_id"]: row for row in sync.load_table(raw_dir, "MasterLiveMusic")[1]}
+
+target_id = sorted(bundled)[0]
+remote_songs = {song_id: {"title": "曲 %s" % song_id,
+                          "charts": {d: dict(c) for d, c in song["charts"].items()}}
+                for song_id, song in bundled.items()}
+remote_songs[target_id]["charts"]["expert"] = dict(
+    remote_songs[target_id]["charts"]["expert"], display=99, combo=1234)
+moved_event = dict(bundled_event, startAt="2030/01/01 00:00:00", endAt="2030/01/08 23:59:59")
+report = sync.diff_views(bundled, remote_songs, bundled_event, moved_event)
+touched, event_rows = sync.apply_changes(sandbox, remote_songs, report)
+check("计数 = 真变的字段数（显示等级 + 物量 = 2）", touched == 2, touched)
+check("活动行写到了", event_rows == 1, event_rows)
+
+scores_after = {row["_id"]: row for row in sync.load_table(sandbox, "MasterLiveMusicScore")[1]}
+music = music_before[int(target_id)]
+patched = scores_after[music["_expertID"]]
+check("显示等级写成了 99", patched["_musicScoreDisplayLevel"] == 99.0, patched["_musicScoreDisplayLevel"])
+check("物量写成了 1234", patched["_fullComboCount"] == 1234, patched["_fullComboCount"])
+check("定数没被动（线上没给新定数时不该瞎改）",
+      patched["_musicScoreLevel"] == scores_before[music["_expertID"]]["_musicScoreLevel"],
+      patched["_musicScoreLevel"])
+others = [d for d in ("easy", "normal", "hard")]
+check("同一首的其它难度一个字节都没改", all(
+    scores_after[music[sync.MUSIC_ID_FIELD[d]]] == scores_before[music[sync.MUSIC_ID_FIELD[d]]] for d in others))
+target_score_ids = {music[sync.MUSIC_ID_FIELD[d]] for d in sync.DIFFICULTIES}
+check("别的歌也没被改",
+      all(scores_after[key] == value for key, value in scores_before.items()
+          if key not in target_score_ids))
+
+event_after = sync.load_table(sandbox, "MasterEvent")[1]
+check("活动窗口写成了新时间", event_after[0]["_startAt"] == "2030/01/01 00:00:00"
+      and event_after[0]["_endAt"] == "2030/01/08 23:59:59", event_after[0])
+check("没碰过的表逐字节不变", all(
+    (sandbox / name).read_bytes() == raw
+    for name, raw in before.items()
+    if name not in ("MasterLiveMusicScore.json", "MasterEvent.json")))
+check("真快照没被这次测试改动（副本里写，原目录不动）", all(
+    (raw_dir / name).read_bytes() == raw for name, raw in before.items()))
+shutil.rmtree(sandbox, ignore_errors=True)
+
 print()
 if problems:
     print("有 %d 项不通过：" % len(problems))

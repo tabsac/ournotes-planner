@@ -13,9 +13,12 @@
   运行期换成远端数据会让「同一份输入」随数据版本漂移。同步只在构建前发生。
 - **不做**：新增曲目（还缺谱面 note 数据，`/data` 里没有）→ 拒绝写入并指路
   `browser/update_snapshot.py --apply`；`cards.json`（网页不用）。
-- `browser/tests/check_snapshot_sync.py` 进全量验收（18 项、不联网）：口径与构建期一致、
+- `browser/tests/check_snapshot_sync.py` 进全量验收（28 项、不联网）：口径与构建期一致、
   与构建产物的 `snapshot-digest.json` 逐首 87/87 一致、`diff_views` 四种情况、三张表写回逐字节相同、
-  坏数据必判 False。写这条测试时当场抓到「写回多加了一个结尾换行 → 每个文件差 1 字节」的真 bug。
+  坏数据必判 False，外加 `apply_changes` 端到端（在 `work/` 的**副本**里写：显示等级/物量/活动窗口都写对、
+  定数没被瞎改、同首其它难度与别的歌一个字节没动、真快照不被测试碰）。
+  写这条测试时当场抓到两个真 bug：**写回多加了一个结尾换行 → 每个文件差 1 字节**（工具侧，已修）、
+  以及测试自己把集合写成了生成器对象导致误报（测试侧，已修）。
 - 实测：对线上站点只读跑 → `✓ 完全一致（内置 87 首 / 线上 87 首）`；对替身后端 `mutate-data`
   改一首 → 精确报「EXPERT 显示等级 25 → 26；EXPERT 物量 768 → 350」，`--write` 后
   `git diff --stat` 恰好 `1 file changed, 2 insertions(+), 2 deletions(-)`。
