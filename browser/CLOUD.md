@@ -2,6 +2,10 @@
 
 > 契约来源：**`服务器-网页对接说明.md`**（在 `C:\Users\13766\dsh-workspace\` 与 `on-share\`，
 > ⚠️ 那份文档里有服务器地址等内部信息，**不要贴进任何仓库**）。本文只写网页这一侧。
+>
+> **反方向的那份（给服务器端）**：`网页-服务器对接说明.md` + `网页-服务器对接-参考实现.py`
+> —— 逐条契约、错误码、CORS/缓存要求、SQLite 表结构、nginx 部署、curl 自测清单，
+> 以及一份**已经用本页这套检查跑通**的最小后端实现。
 
 ## 1. 已经落地的（B 最小版）
 
@@ -49,6 +53,13 @@ python -B browser/build_browser.py --build      # 之后 dist/ 就带着地址�
 
 ```powershell
 # 端到端（自动起替身服务器 + 带代理的预览，跑完自己收工）
+node browser/tests/check_cloud_sync.cjs
+
+# 拿同一套检查去打**真实/自研的后端**（把 reference 指到那个实现）
+#   CLOUD_CHECK_SERVER=reference  CLOUD_CHECK_REFERENCE=<你的实现.py>
+# 文档 §9 那份参考实现就是这么验的（全绿），可以直接当起点改
+$env:CLOUD_CHECK_SERVER='reference'
+$env:CLOUD_CHECK_REFERENCE='C:\Users\13766\dsh-workspace\网页-服务器对接-参考实现.py'
 node browser/tests/check_cloud_sync.cjs
 
 # 对着真实服务器调页面（地址只在本机命令行出现，不进仓库）

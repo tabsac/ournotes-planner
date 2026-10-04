@@ -18,6 +18,11 @@ const {chromium} = require(process.env.OURNOTES_PLAYWRIGHT_MODULE || "playwright
 
 const ROOT = path.resolve(__dirname, "../..");
 const PYTHON = process.env.OURNOTES_PYTHON || (process.platform === "win32" ? "python" : "python3");
+// 用哪一份「服务器」来跑：mock（JS 替身，固定登录码）或 reference（文档 §9 的 Python 参考实现）
+const SERVER_MODE = process.env.CLOUD_CHECK_SERVER || "mock";
+const REFERENCE_SERVER = process.env.CLOUD_CHECK_REFERENCE
+    || path.join(ROOT, "work/reference_api_server.py");
+const BOT_SECRET = "test-bot-secret";
 const PREVIEW_PORT = Number(process.env.CLOUD_CHECK_PORT || 8879);
 const API_PORT = Number(process.env.CLOUD_CHECK_API_PORT || 8907);
 const BASE = `http://127.0.0.1:${PREVIEW_PORT}/ournotes-planner/`;
@@ -45,11 +50,23 @@ const waitFor = (child, marker, timeout = 30000) => new Promise((resolve, reject
 });
 
 const started = [];
-function launch(command, args, marker) {
-    const child = spawn(command, args, {cwd: ROOT, stdio: ["ignore", "pipe", "pipe"]});
+function launch(command, args, marker, env) {
+    const child = spawn(command, args, {cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], env: {...process.env, ...env}});
     started.push(child);
     return waitFor(child, marker).then(() => child);
 }
+
+/** 问服务器要一个一次性登录码（mock 是固定码，参考实现是真码）。 */
+const mintCode = async () => {
+    if (SERVER_MODE !== "reference") return "123456";
+    const response = await fetch(`http://127.0.0.1:${API_PORT}/api/internal/login-code`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json", "X-Bot-Secret": BOT_SECRET},
+        body: JSON.stringify({qq: "39360001"}),
+    });
+    if (!response.ok) throw new Error("取登录码失败: " + response.status);
+    return (await response.json()).code;
+};
 
 function stopAll() {
     for (const child of started) { try { child.kill(); } catch { /* 忽略 */ } }
@@ -133,8 +150,16 @@ const waitForMessage = async (page, pattern, timeout = 6000) => {
 
     let mock, preview, browser;
     try {
-        mock = await launch(process.execPath, [path.join(__dirname, "mock_api_server.cjs"), String(API_PORT)],
-            "mock api:");
+        if (SERVER_MODE === "reference") {
+            const dbPath = path.join(ROOT, "work/cloud-check/reference-api.db");
+            for (const suffix of ["", "-wal", "-shm"]) fs.rmSync(dbPath + suffix, {force: true});
+            mock = await launch(PYTHON, [REFERENCE_SERVER], "ournotes api on",
+                {ON_API_PORT: String(API_PORT), ON_API_DB: dbPath, ON_BOT_SECRET: BOT_SECRET});
+            check(true, "起的是**参考实现**（文档 §9 的 Python 后端）", path.relative(ROOT, REFERENCE_SERVER));
+        } else {
+            mock = await launch(process.execPath, [path.join(__dirname, "mock_api_server.cjs"), String(API_PORT)],
+                "mock api:");
+        }
         preview = await launch(PYTHON, ["-B", path.join(__dirname, "preview_server.py"),
             "--port", String(PREVIEW_PORT), "--api-proxy", `http://127.0.0.1:${API_PORT}`],
             "Static preview:");
@@ -175,7 +200,7 @@ const waitForMessage = async (page, pattern, timeout = 6000) => {
         check(st.error && /登录码/.test(st.msg), "错的登录码被挡下并有提示", st.msg);
         check(!st.loggedIn, "没有登录成功");
 
-        await setPanel(a.page, "#cloudPanel #cloudCode", "123456");
+        await setPanel(a.page, "#cloudPanel #cloudCode", await mintCode());
         await clickAndSettle(a.page, "#cloudPanel #cloudLogin");
         st = await cloudState(a.page);
         check(st.loggedIn && /已登录/.test(st.state), "正确登录码登录成功", st.state);
@@ -199,7 +224,10 @@ const waitForMessage = async (page, pattern, timeout = 6000) => {
         check(!topKeys.some(k => k.startsWith("_")) && onServer[0].size < 64 * 1024
               && stored.payload.entries?.length === 25,
             "上传的是卡片结果（无游戏模型字段，约 10 KB，不是 3 MB 的账号包）",
-            `${topKeys.length} 个字段 / ${onServer[0].size} 字节`);
+            `${topKeys.length} 个字段 / ${onServer[0].size} 字节`
+            + ` / entries ${stored.payload.entries.length}`
+            + ` / notes ${(stored.payload.notes || []).length} 条 ${(stored.payload.notes || []).join("").length} 字`
+            + ` / 本地序列化 ${Buffer.byteLength(JSON.stringify(stored.payload))} 字节`);
         check(stored.payload.entries?.length === 25, "结果里就是那 25 张卡", stored.payload.entries?.length);
         await a.page.locator("#b25Root .b25-panel").screenshot({path: path.join(SHOT_DIR, "device-a.png")});
 
@@ -217,7 +245,7 @@ const waitForMessage = async (page, pattern, timeout = 6000) => {
         await clickAndSettle(b.page, "#cloudPanel #cloudSaveBase");
         bs = await cloudState(b.page);
         check(bs.state === "未登录", "保存地址后变成未登录", bs.state);
-        await setPanel(b.page, "#cloudPanel #cloudCode", "123456");
+        await setPanel(b.page, "#cloudPanel #cloudCode", await mintCode());
         await clickAndSettle(b.page, "#cloudPanel #cloudLogin");
         await clickAndSettle(b.page, "#cloudPanel #cloudRefresh");
         st = await cloudState(b.page);
