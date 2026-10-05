@@ -573,6 +573,211 @@ const click = async (page, selector, settle = 700) => {
                 "顶部弹出「线上数据变了、计算仍用内置快照」的提醒", data.notice.slice(0, 80));
             await ctxC.close();
         }
+
+        // ---- ⑪ 自动同步（P0 修复单的**先红**用例）------------------------------------
+        // 这一节验的是修复单里那 5 条：挂载即拉+应用、上传后刷新状态、切前台节流比对、
+        // b25 自动上传、b25 payload 补 kind。修复之前它会整片失败。
+        //
+        // ⚠️ **默认不跑**：先红的用例留在默认验收里会把 `run_checks.py` 拉红，
+        //    而「红」本身是给修复方看的信号、不是仓库的常态。修复落地后把下面这个 if 去掉即可
+        //    （那时它就该是默认跑、默认绿的那条线）。
+        //
+        //    跑法：CLOUD_AUTOSYNC=1 node browser/tests/check_cloud_sync.cjs
+        console.log("\n[11] 自动同步（P0 修复单的验收：挂载即应用 / 切前台比对 / b25 自动上传）");
+        if (process.env.CLOUD_AUTOSYNC !== "1") {
+            console.log("   [SKIP] 默认不跑（先红用例）；跑法：CLOUD_AUTOSYNC=1 node browser/tests/check_cloud_sync.cjs");
+        } else {
+            const AUTO_USER = USERNAME + "_auto";
+            const profileNameOf = page =>
+                page.evaluate(() => document.getElementById("profileName")?.textContent.trim() ?? null);
+            // 造一个「可辨认的卡库」：走应用自己的卡库桥，别直接改 localStorage（免得测的不是真路径）
+            async function seedProfile(page, name) {
+                const ok = await page.evaluate(async value => {
+                    const bootstrap = await (await window.plannerFetch("/api/bootstrap")).json();
+                    const document_ = window.PlannerProfile.document();
+                    document_.name = value;
+                    document_.is_demo = false;
+                    const member = bootstrap.catalog.members[0].id;
+                    const snap = bootstrap.catalog.snaps[0].id;
+                    document_.profile.inventory.members = [{id: member, level: 20, training_count: 0,
+                        awakening_count: 0, live_skill_level: 1, gekisou_skill_level: 1}];
+                    document_.profile.inventory.snaps = [{id: snap, level: 20, limit_break_count: 0}];
+                    document_.candidate_member_ids = [member];
+                    document_.candidate_snap_ids = [snap];
+                    return window.PlannerProfile.install(document_);
+                }, name);
+                await page.waitForTimeout(600);
+                return ok;
+            }
+            // 「切回前台」：**派发事件**，而不是靠 bringToFront（headless 里所有标签都报 visible，
+            // 真机上才会自然触发）。同时把 visibilityState 覆成 visible —— 这样无论实现方
+            // 有没有额外 gate 在状态上，这条用例都能判它「事件到了就该动」。
+            const toForeground = page => page.evaluate(() => {
+                try { Object.defineProperty(document, "visibilityState", {configurable: true, get: () => "visible"}); } catch { /* 忽略 */ }
+                try { Object.defineProperty(document, "hidden", {configurable: true, get: () => false}); } catch { /* 忽略 */ }
+                document.dispatchEvent(new Event("visibilitychange"));
+            });
+            const syncNoise = t => /401/.test(t) || /409/.test(t) || /503/.test(t)
+                || /(card-images|avatar-images|jacket-images|ui-images)\/.*\.webp/.test(t);
+
+            // 电脑端：注册一个专用账号，造卡库并**手动**上传一次（作为「云端的那一份」）
+            const ctxPc = await browser.newContext({viewport: {width: 1280, height: 1000}});
+            const pc = await openApp(ctxPc);
+            await gotoCloud(pc.page);
+            await click(pc.page, '[data-cloud-view="register"]');
+            await fill(pc.page, "#cloudUsername", AUTO_USER);
+            await fill(pc.page, "#cloudPassword", PASSWORD);
+            await click(pc.page, "#cloudSubmit", 1500);
+            let spc = await pageState(pc.page);
+            check(spc.accountVisible, "自动同步用例的账号已注册并登录", spc.accountName);
+            check(await seedProfile(pc.page, "自动同步卡库-云端"), "电脑端造好一个可辨认的卡库");
+            await gotoCloud(pc.page);
+            await click(pc.page, "#cloudProfilePush", 1500);
+            spc = await pageState(pc.page);
+            check(/已同步/.test(spc.profileLine || ""), "[D] 上传成功后本机状态**不用再点**就是「已同步」",
+                spc.profileLine || spc.msg);
+            const autoToken = await pc.page.evaluate(() => localStorage.getItem("ournotes-cloud-token"));
+
+            // 手机端：**全新上下文、只注入 token**（模拟「已登录、刚打开页面」），
+            // 而且**不设关联指针** → 走的就是「新设备按 kind 找最新一条」那条路。
+            const ctxPhone = await browser.newContext({viewport: {width: 412, height: 915}});
+            await ctxPhone.addInitScript(value => {
+                localStorage.setItem("ournotes-cloud-token", value.token);
+                localStorage.setItem("ournotes-cloud-api-base", value.apiBase);
+            }, {token: autoToken, apiBase: API_BASE});
+            const phone = await openApp(ctxPhone);
+            // ⚠️ 一个按钮都不点，只等本机卡库自己变成云端那份
+            await phone.page.waitForFunction(
+                () => document.getElementById("profileName")?.textContent.trim() === "自动同步卡库-云端",
+                null, {timeout: 25000}).catch(() => {});
+            const phoneName = await profileNameOf(phone.page);
+            check(phoneName === "自动同步卡库-云端",
+                "[A1] 手机端「已登录 + 刚打开」不点任何按钮就自动装上云端卡库", phoneName);
+
+            // [B1] 电脑改一次（走 debounce 自动推）→ 手机切回前台 → 不点按钮就更新
+            await seedProfile(pc.page, "自动同步卡库-切前台");
+            const debouncedPut = await (async () => {
+                await pc.page.waitForTimeout(9000);          // debounce 4 秒 + 往返
+                return pc.net.some(r => r.method === "PUT" && /\/api\/results\//.test(r.url));
+            })();
+            check(debouncedPut, "电脑端的本地改动按 debounce 自动推上去了",
+                pc.net.map(r => `${r.method} ${r.status}`).join(" | ") || "(没有请求)");
+            phone.net.length = 0;
+            await toForeground(phone.page);
+            await phone.page.waitForFunction(
+                () => document.getElementById("profileName")?.textContent.trim() === "自动同步卡库-切前台",
+                null, {timeout: 25000}).catch(() => {});
+            const phoneAfter = await profileNameOf(phone.page);
+            check(phoneAfter === "自动同步卡库-切前台",
+                "[B1] 切回前台（visibilitychange）不点任何按钮就拉到电脑端的新改动", phoneAfter);
+
+            // [B2] 节流：云端**确实新了一版**的前提下，连着切两次前台 → 比对只允许发生 **1 次**。
+            //      ⚠️ 判据写成「=== 1」而不是「<= 1」：后者在「根本没实现自动比对」时会空过（假绿）。
+            await seedProfile(pc.page, "自动同步卡库-节流");
+            await pc.page.waitForTimeout(9000);              // 等它推上去
+            phone.net.length = 0;
+            await toForeground(phone.page);
+            await phone.page.waitForTimeout(700);            // 节流窗口内再切一次
+            await toForeground(phone.page);
+            await phone.page.waitForTimeout(3000);
+            const compareCalls = phone.net.filter(r => r.method === "GET" && /\/api\/results/.test(r.url));
+            check(compareCalls.length === 1,
+                "[B2] 云端有新版本时，两次切前台之间只比对 1 次（节流生效）",
+                `${compareCalls.length} 次 · ` + (phone.net.map(r => `${r.method} ${r.status}`).join(" | ") || "(没有请求)"));
+
+            // [A2] 本机有未传改动时**不许静默覆盖**：云端先新一版，然后手机本地改一次、
+            //      在 debounce（4 秒）窗口内立刻切前台 —— 这正是最容易出竞态的时序。
+            await seedProfile(pc.page, "自动同步卡库-云端更新");
+            await pc.page.waitForTimeout(9000);
+            await seedProfile(phone.page, "本机刚改的");
+            await toForeground(phone.page);
+            await phone.page.waitForTimeout(9000);            // debounce + 往返 + 409
+            const keptName = await profileNameOf(phone.page);
+            const conflictShown = await phone.page.evaluate(() => {
+                if (document.querySelector("#cloudConflictKeep, #cloudConflictPull")) return "冲突选择框";
+                const panel = document.querySelector("#cloudRoot")?.textContent.replace(/\s+/g, " ") ?? "";
+                if (/冲突/.test(panel)) return "云面板里出现「冲突」";
+                const notice = document.querySelector("#message")?.textContent ?? "";
+                if (/冲突/.test(notice)) return "页面提示里出现「冲突」";
+                return "";
+            });
+            check(keptName === "本机刚改的",
+                "[A2] 本机有未传改动时**不被静默覆盖**（名字仍是本机那个）", keptName);
+            check(!!conflictShown, "[A2] 并且把冲突交给人决定（不静默）", conflictShown || "(没有任何冲突提示)");
+
+            // [C1] b25：导入账号包 → **不点**「把这张卡存到云端」就该自动上传，且 payload 带 kind
+            await phone.page.locator('[data-tab="account"]').click();
+            await phone.page.waitForSelector("#accountImportRoot #accountDrop", {timeout: 60000});
+            await phone.page.setInputFiles("#accountImportRoot input[type=file]:not([webkitdirectory])", SAMPLE);
+            await phone.page.waitForSelector("#accountB25 .b25-teaser", {timeout: 180000});
+            phone.net.length = 0;
+            const b25AutoUploaded = await (async () => {
+                for (let i = 0; i < 20; i++) {
+                    await phone.page.waitForTimeout(1500);
+                    if (phone.net.some(r => (r.method === "POST" || r.method === "PUT") && /\/api\/results/.test(r.url))) {
+                        return true;
+                    }
+                }
+                return false;
+            })();
+            check(b25AutoUploaded, "[C1] b25 生成后不点按钮就自动上传",
+                phone.net.map(r => `${r.method} ${r.status}`).join(" | ") || "(没有请求)");
+            const autoList = await (await api("/api/results",
+                {headers: {Authorization: "Bearer " + autoToken}})).json();
+            let b25Stored = null;
+            for (const item of (autoList || []).slice(0, 6)) {
+                const full = await (await api("/api/results/" + item.id,
+                    {headers: {Authorization: "Bearer " + autoToken}})).json();
+                if (Array.isArray(full?.payload?.entries)) { b25Stored = full; break; }
+            }
+            check(b25Stored?.payload?.kind === "b25",
+                '[C1] 上传的 payload 带 kind:"b25"（服务端/客户端才可能按 kind 找）',
+                b25Stored ? `title=${b25Stored.title} kind=${b25Stored.payload?.kind ?? "(缺)"}` : "(没取到 b25 记录)");
+
+            // [C2] 老数据兼容：云端**已经存在没有 kind 的 b25 记录**（这次要补的字段以前没写）。
+            //      补上 kind 之后如果不兼容，"按 kind 找最新"会找不到老记录 → 用户切回来看到空的。
+            const legacyRecord = await phone.page.evaluate(() => {
+                const key = Object.keys(localStorage).find(k => k.startsWith("ournotes-b25-v1"));
+                const record = key ? JSON.parse(localStorage.getItem(key)) : null;
+                if (record) delete record.kind;               // 老记录的形态：没有 kind
+                return record;
+            });
+            const legacyUser = USERNAME + "_legacy";
+            const legacyReg = await (await api("/api/register", {method: "POST",
+                body: JSON.stringify({username: legacyUser, password: PASSWORD})})).json();
+            check(!!legacyReg.token, "为「无 kind 的老记录」用例另开一个账号", legacyUser);
+            const legacyCreated = await (await api("/api/results", {method: "POST",
+                headers: {Authorization: "Bearer " + legacyReg.token},
+                body: JSON.stringify({title: "B25 成绩（老记录·无 kind）", summary: "历史数据",
+                    payload: legacyRecord})})).json();
+            check(!!legacyCreated?.id, "往云端塞一条没有 kind 的 b25 记录",
+                legacyCreated?.id || JSON.stringify(legacyCreated).slice(0, 120));
+            const ctxLegacy = await browser.newContext({viewport: {width: 412, height: 915}});
+            await ctxLegacy.addInitScript(value => {
+                localStorage.setItem("ournotes-cloud-token", value.token);
+                localStorage.setItem("ournotes-cloud-api-base", value.apiBase);
+            }, {token: legacyReg.token, apiBase: API_BASE});
+            const legacy = await openApp(ctxLegacy);
+            const legacyApplied = await (async () => {
+                for (let i = 0; i < 20; i++) {
+                    await legacy.page.waitForTimeout(1200);
+                    const count = await legacy.page.evaluate(() => {
+                        const key = Object.keys(localStorage).find(k => k.startsWith("ournotes-b25-v1"));
+                        const record = key ? JSON.parse(localStorage.getItem(key)) : null;
+                        return record?.entries?.length ?? 0;
+                    });
+                    if (count >= 25) return count;
+                }
+                return 0;
+            })();
+            check(legacyApplied >= 25,
+                "[C2] 没有 kind 的历史 b25 记录也要能被自动应用（否则老用户切回来是空的）",
+                legacyApplied ? `${legacyApplied} 张卡` : "本机没有 b25 数据");
+
+            check(phone.bad.filter(t => !syncNoise(t)).length === 0, "自动同步这一段手机端没有意外报错",
+                phone.bad.filter(t => !syncNoise(t)).slice(0, 3).join(" | "));
+            await ctxPhone.close(); await ctxLegacy.close(); await ctxPc.close();
+        }
     } catch (error) {
         console.error("!!! 失败:", error.message);
         problems.push("异常: " + error.message);

@@ -8,6 +8,10 @@
  *   POST /api/internal/touch-result{id, by}     模拟「另一台设备改过这条结果」→ version 顶上去（制造 409）
  *   POST /api/internal/mutate-data {id, display, combo}  模拟「线上曲目数据变了」
  *
+ * ⚠️ `GET /api/results` 每条**必须带 `kind`**（`payload.kind` 优先，老数据按形状嗅探）——
+ *    这是真实服务端 2026-10-05 修复单 §3.1 的行为，客户端「按 kind 找最新一条」的自动同步
+ *    依赖它。假后端不对齐的话，那条链路在替身上永远测不出来（修完了也过不了）。
+ *
  *   node browser/tests/mock_account_api.cjs 8907
  */
 const http = require("http");
@@ -94,6 +98,21 @@ function dataFiles() {
 const now = () => Math.floor(Date.now() / 1000);
 const newToken = () => crypto.randomBytes(32).toString("base64url");   // 43 字符
 const accountPublic = a => ({id: a.id, username: a.username, qq: a.qq ?? null, createdAt: a.createdAt});
+
+/**
+ * 这条结果是什么 kind —— **与真实服务端同一条规则**（服务器侧 2026-10-05 的修复单 §3.1）：
+ *   1. `payload.kind` 优先；
+ *   2. 老数据（还没有 kind 的那些）按形状嗅探：有 `document` → profile；有 `entries` / `playerName` → b25。
+ * 假后端必须跟着回 `kind`，否则「客户端按 kind 找最新一条」这条链路在替身上永远测不出来
+ * （修完了也过不了，等于白写用例）。
+ */
+function sniffKind(payload) {
+    if (!payload || typeof payload !== "object") return null;
+    if (typeof payload.kind === "string" && payload.kind) return payload.kind;
+    if (payload.document) return "profile";
+    if (Array.isArray(payload.entries) || typeof payload.playerName === "string") return "b25";
+    return null;
+}
 
 /** 服务端侧的敏感字段剔除（红线：只存可公开结果）。 */
 const SENSITIVE = /(access[_-]?key|id[_-]?token|token|credential|password|passwd|secret|sign|session|ssid|udid|device[_-]?id|\bmid\b|openid|cookie|authorization|auth[_-]?key)/i;
@@ -315,7 +334,8 @@ const server = http.createServer(async (req, res) => {
     if (path === "/api/results" && req.method === "GET") {
         const list = [...results.values()].filter(r => r.accountId === account.id)
             .sort((a, b) => b.createdAt - a.createdAt)
-            .map(r => ({id: r.id, title: r.title, summary: r.summary, createdAt: r.createdAt,
+            .map(r => ({id: r.id, kind: sniffKind(r.payload), title: r.title, summary: r.summary,
+                        version: r.version, createdAt: r.createdAt, updatedAt: r.updatedAt,
                         size: Buffer.byteLength(JSON.stringify(r.payload))}));
         return send(res, 200, list, {origin});
     }
@@ -343,7 +363,7 @@ const server = http.createServer(async (req, res) => {
         const id = decodeURIComponent(match[1]);
         const row = results.get(id);
         if (!row || row.accountId !== account.id) return fail(res, 404, "not_found", "没有这条结果", origin);
-        if (req.method === "GET") return send(res, 200, row, {origin});
+        if (req.method === "GET") return send(res, 200, {...row, kind: sniffKind(row.payload)}, {origin});
         if (req.method === "PUT") {
             const body = await readBody(req) || {};
             if (Number(body.version) !== row.version) {
