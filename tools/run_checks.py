@@ -17,10 +17,15 @@ MOBILE_EVIDENCE = Path(os.environ.get("OURNOTES_MOBILE_EVIDENCE")
 
 # 构建摘要：与生产者（tools/mobile/make_mobile_evidence.py）共用同一份实现。
 sys.path.insert(0, str(ROOT / "tools" / "mobile"))
+sys.path.insert(0, str(ROOT / "tools"))
 from build_digest import build_digest  # noqa: E402
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--port", type=int, default=8878)
+parser.add_argument("--delivery", action="store_true",
+                    help="额外跑交付护栏（tools/verify_delivery.py）：browser/dist 必须是**交付构建**"
+                         "（带同源 api-base 标记）。发正式站前用；镜像发版流程默认不跑，"
+                         "因为镜像构建本来就不许带那个标记。")
 args = parser.parse_args()
 dest = ROOT / "work/validation"
 dest.mkdir(parents=True, exist_ok=True)
@@ -95,6 +100,19 @@ try:
     browser_version = json.loads((ROOT / "browser/package.json").read_text("utf-8"))["version"]
     current_build = build_digest(json.loads((ROOT / "browser/dist/build-info.json").read_text("utf-8")))
     mobile_verified, mobile_detail = load_mobile_evidence(browser_version, current_build)
+    # 交付护栏：只在明确要发正式站时跑（见 --delivery 的说明）。
+    # 放在这里而不是更早，是因为它检查的是**产物形态**，与前面那些功能检查互不相干；
+    # 没过就当场抛错，别让它混进「全部通过」里（§11.1 那个"静默降级"的教训）。
+    delivery = None
+    if args.delivery:
+        import verify_delivery
+        delivery = verify_delivery.check_delivery(ROOT / "browser/dist")
+        if not delivery["passed"]:
+            raise RuntimeError("交付护栏没过 —— browser/dist 不是交付构建（发正式站会让云端功能静默失效）：\n"
+                               + "\n".join("  FAIL %s: %s" % (item["name"], item["detail"])
+                                           for item in delivery["checks"] if not item["ok"]))
+        print("交付护栏 PASS：browser/dist 带同源 api-base 标记（index.html %d B, sha256 %s…）"
+              % (delivery["index_html_bytes"], delivery["index_html_sha256"][:16]), flush=True)
     summary = {"passed": True, "browser_version": browser_version,
                "current_build": current_build,
                "core_version": reports["score-oracle"]["core_version"],
@@ -104,7 +122,8 @@ try:
                "power_modes": reports["power-modes"],
                "b25_selection": reports["b25-selection"],
                "real_mobile_device_verified": mobile_verified,
-               "real_mobile_device": mobile_detail}
+               "real_mobile_device": mobile_detail,
+               "delivery": delivery}
     (dest / "validation-summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), "utf-8")
     print("All native/browser checks passed", flush=True)
     print(f"real_mobile_device_verified = {mobile_verified}  ({mobile_detail.get('reason')})", flush=True)

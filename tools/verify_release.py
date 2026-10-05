@@ -9,7 +9,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def verify(site):
+def verify(site, expect_api_base=False):
     site = Path(site).resolve()
     config = json.loads((ROOT / "browser/upstream.json").read_text("utf-8"))
     package = json.loads((ROOT / "browser/package.json").read_text("utf-8"))
@@ -43,12 +43,27 @@ def verify(site):
     if any(p.stat().st_size >= 100 * 1024 * 1024 for p in files.values()):
         raise ValueError("A static file exceeds GitHub's individual file limit")
     html = (site / "index.html").read_text("utf-8")
-    # 私密红线 + 部署纪律：**要发布的站点不许带 api-base 标记**。
-    #   * 带绝对地址 → 等于把服务器地址写进公开仓库（红线）；
-    #   * 即使是空串（同源）：公开镜像站（GitHub Pages）上没有 `/api`，带上它只会让云端面板
-    #     去打必然 404 的同源接口，体验更糟。
-    # 所以：`docs/` 那份必须是**不带本地配置**构建的产物；带标记的那份只作为交付包给服务器。
-    if "ournotes-api-base" in html:
+    # 两种产物在 api-base 标记上**互为反面**，所以由调用方声明手里这份是哪一种。
+    #
+    # expect_api_base=False（默认；`docs/` 公开镜像站）：**必须不带**。
+    #   * 带绝对地址 → 等于把服务器地址写进公开仓库（红线 §0.1）；
+    #   * 即使是空串（同源）：镜像站上没有 `/api`，带上它只会让云端面板去打必然 404 的
+    #     同源接口，体验更糟。
+    #
+    # expect_api_base=True（正式站交付构建）：**必须带**，且必须是逐字的同源空串。
+    #   这一侧以前**没有任何地方断言**，正是 2026-10-05 事故的成因：镜像构建发到正式站 →
+    #   页面读不到这个 meta → `apiBase()` 为 null → 云端功能静默失效（零 `/api` 请求）、
+    #   从部署那一刻起就是坏的。两份产物唯一差异就是这 42 字节（13968 ↔ 13926 B）。
+    #   构建期与打包期由 `tools/verify_delivery.py` 双向把住（它还比对两份产物只差这 42 字节）。
+    same_origin = '<meta name="ournotes-api-base" content="">'
+    if expect_api_base:
+        if same_origin not in html:
+            raise ValueError(
+                "Delivery build must carry exactly %s (same origin). Build it with "
+                'browser/api-config.local.json = {"apiBase": ""}; a mirror build shipped to the '
+                "real site makes the cloud features fail silently (not one /api request)."
+                % same_origin)
+    elif "ournotes-api-base" in html:
         raise ValueError("Published site must be built WITHOUT browser/api-config.local.json "
                          "(found an ournotes-api-base meta tag)")
     for relative in re.findall(r'(?:src|href)="(\./assets/[^\"]+)"', html):
@@ -62,5 +77,14 @@ def verify(site):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--site", type=Path, default=ROOT / "docs")
+    parser.add_argument("--expect-api-base", action="store_true",
+                        help="这份是**正式站交付构建**：必须带同源 api-base 标记（默认按公开镜像查，必须不带）")
     args = parser.parse_args()
-    print(json.dumps(verify(args.site), ensure_ascii=False))
+    # 从命令行跑时给一行干净的 FAIL，而不是 traceback（`verify()` 本身仍然抛异常，
+    # 供 package_release.py / publish_site.py 这些调用方按老样子捕获）。
+    try:
+        result = verify(args.site, expect_api_base=args.expect_api_base)
+    except (ValueError, OSError) as error:
+        print("FAIL %s: %s" % (args.site, error))
+        raise SystemExit(1)
+    print(json.dumps(result, ensure_ascii=False))
