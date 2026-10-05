@@ -102,13 +102,36 @@ self.browser_solve = raw => {
   return decoder.decode(new Uint8Array(shared, 8, Atomics.load(control, 1)).slice());
 };
 
+/**
+ * 运行时数据的缓存键 —— 用**内容哈希**（`build-info.json` 里的 `runtime_sha256`），不是网页版本号。
+ *
+ * 为什么（2026-10-05 真踩过）：只换运行期数据、网页版本号不动时，URL `planner-runtime.zip?v=0.3.2`
+ * 一模一样；而 nginx 对 `.zip` 有 7 天缓存 → 老访客一直用缓存里的旧运行时（新曲目就是不可选），
+ * 服务端改 nginx 也**追不回**已经缓存住的那些浏览器。换成内容哈希后 URL 随数据变，缓存自然失效。
+ *
+ * 清单本身用 `no-cache` 取（拿不到就退回版本号，行为与老版本一致）。
+ */
+async function runtimeCacheKey(baseURL) {
+  try {
+    const response = await fetch(baseURL + 'build-info.json', {cache: 'no-cache'});
+    if (response.ok) {
+      const info = await response.json();
+      if (typeof info?.runtime_sha256 === 'string' && info.runtime_sha256) return info.runtime_sha256;
+    }
+  } catch (error) { /* 清单拿不到就用版本号兜底，别让初始化挂掉 */ }
+  return browserVersion;
+}
+
 async function initialize({baseURL, stored}) {
   self.postMessage({type: 'loading', text: '正在下载并准备计算组件，首次打开请稍候…'});
   const indexURL = baseURL + 'vendor/pyodide/';
   const {loadPyodide} = await import(/* @vite-ignore */ indexURL + 'pyodide.mjs');
   pyodide = await loadPyodide({indexURL});
   self.postMessage({type: 'loading', text: '正在核对游戏数据与公式…'});
-  const response = await fetch(baseURL + 'planner-runtime.zip?v=' + encodeURIComponent(browserVersion));
+  const runtimeKey = await runtimeCacheKey(baseURL);
+  // 再加一道 no-cache：即使 URL 撞了（清单是缓存的、或旧客户端），也让浏览器**协商**而不是直接用缓存。
+  const response = await fetch(baseURL + 'planner-runtime.zip?v=' + encodeURIComponent(runtimeKey),
+                               {cache: 'no-cache'});
   if (!response.ok) throw new Error('计算资料加载失败，请刷新网页。');
   const bytes = new Uint8Array(await response.arrayBuffer());
   pyodide.unpackArchive(bytes, 'zip', {extractDir: '/planner'});

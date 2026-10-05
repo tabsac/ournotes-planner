@@ -129,7 +129,11 @@ function compare(actual, expected) {
     const appRequests=requests.filter(request=>request.url.startsWith(new URL(BASE).origin));
     const runtimes=appRequests.filter(request=>new URL(request.url).pathname.endsWith('/planner-runtime.zip'));
     assert.ok(runtimes.length>0);
-    assert.ok(runtimes.every(request=>new URL(request.url).searchParams.get('v')===require('../package.json').version));
+    // 缓存键必须是**运行时内容哈希**，不是网页版本号：只换运行期数据时版本号不变，
+    // 用版本号当键会让 7 天缓存里的旧运行时一直生效（2026-10-05 真踩过：新曲目一直不可选）。
+    const runtimeSha = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'dist', 'build-info.json'), 'utf8')).runtime_sha256;
+    assert.ok(runtimeSha);
+    assert.ok(runtimes.every(request => new URL(request.url).searchParams.get('v') === runtimeSha));
     assert.ok(appRequests.every(request=>request.method==='GET'));
     assert.ok(appRequests.every(request=>!new URL(request.url).pathname.includes('/api/')));
     assert.ok(blockedInjections.every(request=>request.origin.includes('kaspersky-labs.com')));
