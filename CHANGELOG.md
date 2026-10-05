@@ -1,5 +1,41 @@
 # 变更记录
 
+## 真机验证工具链修复 — 2026-10-05（只动 `tools/mobile/`，网页代码与版本号 0.3.2 都不变）
+
+**「CDP 连上了但 target 的 url 是空的」查了一整轮，真凶是这台电脑的 9222 端口被 After Effects 占了。**
+
+- **坑 1（最贵的一个）：主机端口被抢，驱动却跟别的程序说话。**
+  Adobe After Effects 的 UXP 调试端口**默认就是 9222**（`curl 127.0.0.1:9222/json/version`
+  → `{"Browser":"Adobe UXP"}`）。`adb forward tcp:9222 …` 只回一句
+  `cannot bind listener: … 10048` 就失败，而 `driver.ps1` **照样打印「forward 成功」**，
+  随后 `Wait-Cdp` 去 curl 9222 拿到的是 After Effects 的 devtools —— **它也回
+  `webSocketDebuggerUrl`、也列一个 `type=page` 的 target**，于是脚本大喊 `CDP READY`。
+  症状（`Cannot find default execution context`、`Storage.clearDataForOrigin -32601`、
+  WS「连不上」）和「手机没导航 / 模态框挡着」**一模一样**，前几轮全在手机上找原因。
+  修法：`Ensure-Forward()` 先探主机端口是否被占（`Test-HostPortBusy`），建完**用
+  `forward --list` 核对整条映射**，不在就往后换端口；`Wait-Cdp` 把 `Adobe UXP` 当假货拒掉。
+- **坑 2：「映射在」≠「能用」。** 掉线后 adb 会把本地监听留着绑在死掉的 transport 上，
+  `forward --list` 照样有这条，而「缺了再加」是无效的（adb 幂等忽略）→ CDP 十五分钟没应答。
+  现在 watchdog 每轮**探 `/json`**，探不通且设备在线满 ~60 秒就**硬重建 forward**
+  （只动 forward、绝不动 reverse，页面可能正在下载）。
+- **坑 3：`reload` 写死 `ignoreCache:true` + 服务器 `no-store` = 每次重下 27 MB。**
+  窄链路（宿主机↔云手机 ~180 KB/s）下永远下不完。现在 reload **默认不绕过** HTTP 缓存
+  （`MOBILE_RELOAD_BYPASS_CACHE=1` 才绕过）；资源名带内容哈希、运行时 URL 带
+  `?v=<runtime_sha256>`，缓存里拿不到别的构建。
+- **坑 4：真机上「取第一个 devtools socket」必然连错**（设备上还开着别的 WebView；
+  而且各家 socket 名不同：云手机 X 浏览器 `webview_devtools_remote_<pid>`、
+  真机夸克 `huawei_webview_devtools_remote_<pid>`）。现在按 `/json` 里**有没有应用页**认。
+- **其他**：`/json` 重试窗口 150 秒 → 10 分钟（`MOBILE_JSON_TRIES`）；步骤失败会硬刷隧道重试一次
+  （`-StepRetries`，判据不变）；`-Url` 会同步给 node 侧（`WATCH_URL`）；手机没有 `curl`
+  （HarmonyOS）时自检只记一行不算失败；`Dismiss-BrowserDialog` 也会点「同意」（首启协议框）。
+- **真机实测（HUAWEI HBN-AL80 / HarmonyOS / Android 12）**：自带浏览器与 Via **都不开**
+  WebView 调试口；夸克虽开，但把页面渲染在自家内核里（系统 WebView 那个 target
+  `"visible":false`、DOM 里没有应用元素）→ 自动驱动在这类机器上走不通。**改成人工操作 +
+  主机侧取证**：主机 push 测试卡库、截图、拉导出结果，再对原生 oracle 比对。
+  设备侧还踩到两条：卡库 JSON 必须 **ASCII 文件名 + `MEDIA_SCANNER_SCAN_FILE` 广播**
+  （否则华为选择器显示成「BIN 文件」而灰掉）；**息屏会让 WebView 冻结**、
+  所有 `Runtime.evaluate` 30 秒超时（`svc power stayon true` 可解）。
+
 ## 修运行时的缓存键 — 2026-10-05（网页代码有改动，版本号仍 0.3.2）
 
 **「只换运行时、不动版本号」会让老访客一直用旧运行时**（服务器侧交叉验证时挖出来的真坑）。

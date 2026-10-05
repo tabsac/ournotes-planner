@@ -181,7 +181,17 @@ class Session {
   log(line) { if (this.talkative) console.log(`[${stamp()}]${this.label ? ` [${this.label}]` : ''} ${line}`); }
 
   // ------------------------------------------------------------ 列 targets / 选 target
-  async targets(tries = 60, gapMs = 2500) {
+  /**
+   * 列 targets，列不到就耐心重试。
+   *
+   * ⚠️ 默认重试窗口要**够长**：云手机掉线是成串来的（实测一分钟里能掉 20 次），
+   *    每次掉线 adb 都会把 CDP 的 forward 抹掉，"socket hang up" / ECONNREFUSED 交替出现。
+   *    主机侧的 watchdog 每 3 秒补一次隧道、探到「映射在但已死」还会硬重建（约 60 秒一轮），
+   *    所以链路通常一两分钟就回来 —— 但原来只等 150 秒（60×2.5s），一个大点的掉线串就能把
+   *    整轮 watch 判死，前面的下载全白费。这里放宽到 10 分钟（可用 `MOBILE_JSON_TRIES` 调）。
+   *    放宽的只是**等链路**的耐心，判据（compare.js 对原生 oracle）一个字没动。
+   */
+  async targets(tries = Number(process.env.MOBILE_JSON_TRIES || 240), gapMs = 2500) {
     let last;
     for (let i = 1; i <= tries; i++) {
       try { return await targetsOnce(this.port); } catch (e) {
@@ -475,7 +485,18 @@ class Session {
     await this.cdp.send('Page.navigate', {url: this.appUrl}).catch(() => {});
     await sleep(800);
     this.live = true;
-    await this.cdp.send('Page.reload', {ignoreCache: true}).catch(() => {});
+    // ⚠️ reload 要不要**绕过 HTTP 缓存**：默认**不绕过**（2026-10-05 改）。
+    //    为什么改：真机验证的链路很窄（实测宿主↔云手机 ~180 KB/s），而应用一次冷启动要下
+    //    ~27 MB（pyodide 9.6 MB + ortools wasm 11 MB + stdlib + 运行时包）。`ignoreCache:true`
+    //    等于每次 reload 都把这 27 MB **重下一遍**；而云手机每隔几十秒掉一次线，一掉线就把
+    //    在途的请求掐死 —— 于是永远凑不出一次完整下载，boot 次次超时（实测连卡三轮）。
+    //    不绕过缓存是安全的：资源名都带内容哈希（`assets/*-<hash>.wasm` 之类），应用自己取的
+    //    运行时 URL 也带 `?v=<runtime_sha256>` —— 换了构建就是**另一个 URL**，缓存里拿不到旧货；
+    //    HTML 本身由服务器/Browser 的缓存策略决定，这里不额外放宽。
+    //    要验冷启动、或要看资源新鲜度时：`MOBILE_RELOAD_BYPASS_CACHE=1`。
+    const bypassCache = !!process.env.MOBILE_RELOAD_BYPASS_CACHE;
+    await this.cdp.send('Page.reload', {ignoreCache: bypassCache}).catch(() => {});
+    this.log(`  reload 完成（ignoreCache=${bypassCache}）`);
     this.cdp.close();
     this.cdp = null;      // reload 之后旧的 WebSocket 会话没用了，必须重新列 targets
     this.targetId = pinned;

@@ -1,16 +1,16 @@
 {
   "schema": "ournotes-mobile-verification/1",
   "verified": true,
-  "checked_at": "2026-10-05T03:24:09+08:00",
+  "checked_at": "2026-10-05T18:28:23+08:00",
   "device": {
-    "serial": "103.36.204.38:499",
-    "model": "PCHM30",
-    "android": "11",
-    "sdk": 30
+    "serial": "33Z0224521011939",
+    "model": "HBN-AL80",
+    "android": "12",
+    "sdk": 31
   },
   "browser": {
-    "package": "com.mmbox.xbrowser",
-    "webview_version": "124.0.6367.179"
+    "package": "com.huawei.browser",
+    "webview_version": "17.0.8.310 (UA Chrome/132.0.6834.79)"
   },
   "environment": {
     "cross_origin_isolated": false,
@@ -22,6 +22,61 @@
     "core_version": "0.2.5"
   },
   "cases": [
+    {
+      "name": "solver-ap",
+      "result_file": "result-solver-ap.json",
+      "compare": "PASSED",
+      "ok": true,
+      "compare_output": [
+        "（比对对象：C:\\Users\\13766\\dsh-workspace\\ournotes-team-planner-web\\work\\mobile\\result-solver-ap.json）",
+        "  （oracle：C:\\Users\\13766\\dsh-workspace\\ournotes-team-planner-web\\work\\validation\\solver-ap.json）",
+        "PASSED  solver-ap",
+        "  algorithm          = adaptive_cp_sat_with_exact_score_oracle",
+        "  optimality_proven  = true",
+        "  complete           = true",
+        "  event_pt  = event_pt 11050 / shop_pt 15770 / cp 剩余 0 / power 233983/299601",
+        "  shop_pt   = event_pt 11050 / shop_pt 15770 / cp 剩余 0 / power 233983/299601"
+      ],
+      "algorithm": "adaptive_cp_sat_with_exact_score_oracle",
+      "optimality_proven": true,
+      "complete": true,
+      "totals": {
+        "event_pt": {
+          "normal_plays": 5,
+          "challenge_plays": 2,
+          "boost_budget": 20,
+          "boost_spent": 20,
+          "boost_remaining": 0,
+          "starting_cp": 0,
+          "cp_gained": 400,
+          "cp_spent": 400,
+          "cp_remaining": 0,
+          "event_pt": 11050,
+          "shop_pt": 15770,
+          "ordinary_event_pt": 4250,
+          "ordinary_shop_pt": 5700,
+          "challenge_event_pt": 6800,
+          "challenge_shop_pt": 10070
+        },
+        "shop_pt": {
+          "normal_plays": 5,
+          "challenge_plays": 2,
+          "boost_budget": 20,
+          "boost_spent": 20,
+          "boost_remaining": 0,
+          "starting_cp": 0,
+          "cp_gained": 400,
+          "cp_spent": 400,
+          "cp_remaining": 0,
+          "event_pt": 11050,
+          "shop_pt": 15770,
+          "ordinary_event_pt": 4250,
+          "ordinary_shop_pt": 5700,
+          "challenge_event_pt": 6800,
+          "challenge_shop_pt": 10070
+        }
+      }
+    },
     {
       "name": "solver-mixed-rounding",
       "result_file": "result-solver-mixed-rounding.json",
@@ -76,62 +131,7 @@
           "challenge_shop_pt": 10070
         }
       }
-    },
-    {
-      "name": "after-cancel:solver-ap",
-      "result_file": "result-after-cancel-solver-ap.json",
-      "compare": "PASSED",
-      "ok": true,
-      "compare_output": [
-        "（比对对象：C:\\Users\\13766\\dsh-workspace\\ournotes-team-planner-web\\work\\mobile\\result-after-cancel-solver-ap.json）",
-        "  （oracle：C:\\Users\\13766\\dsh-workspace\\ournotes-team-planner-web\\work\\validation\\solver-ap.json）",
-        "PASSED  solver-ap",
-        "  algorithm          = adaptive_cp_sat_with_exact_score_oracle",
-        "  optimality_proven  = true",
-        "  complete           = true",
-        "  event_pt  = event_pt 11050 / shop_pt 15770 / cp 剩余 0 / power 233983/299601",
-        "  shop_pt   = event_pt 11050 / shop_pt 15770 / cp 剩余 0 / power 233983/299601"
-      ],
-      "algorithm": "adaptive_cp_sat_with_exact_score_oracle",
-      "optimality_proven": true,
-      "complete": true,
-      "totals": {
-        "event_pt": {
-          "normal_plays": 5,
-          "challenge_plays": 2,
-          "boost_budget": 20,
-          "boost_spent": 20,
-          "boost_remaining": 0,
-          "starting_cp": 0,
-          "cp_gained": 400,
-          "cp_spent": 400,
-          "cp_remaining": 0,
-          "event_pt": 11050,
-          "shop_pt": 15770,
-          "ordinary_event_pt": 4250,
-          "ordinary_shop_pt": 5700,
-          "challenge_event_pt": 6800,
-          "challenge_shop_pt": 10070
-        },
-        "shop_pt": {
-          "normal_plays": 5,
-          "challenge_plays": 2,
-          "boost_budget": 20,
-          "boost_spent": 20,
-          "boost_remaining": 0,
-          "starting_cp": 0,
-          "cp_gained": 400,
-          "cp_spent": 400,
-          "cp_remaining": 0,
-          "event_pt": 11050,
-          "shop_pt": 15770,
-          "ordinary_event_pt": 4250,
-          "ordinary_shop_pt": 5700,
-          "challenge_event_pt": 6800,
-          "challenge_shop_pt": 10070
-        }
-      }
     }
   ],
-  "notes": "云手机 PCHM30（Android 11 / WebView 124 / X 浏览器）上走应用自己的路径：无跨源隔离（server.py 不发 COOP/COEP，crossOriginIsolated=false、无 SharedArrayBuffer）→ 清空存储从零算 → 导入卡库 → 计算 → 取消 → 重跑 → 与原生 oracle 逐条比对。构建 0.3.2（2026-10-05）。"
+  "notes": "真机 HUAWEI HBN-AL80（HarmonyOS / Android 12、SDK 31）**自带浏览器**（com.huawei.browser 17.0.8.310）上，走应用自己的路径：导入卡库 → 开始计算 → 导出本次结果；导出文件用 adb 取回，再与原生 oracle 逐字段比对。页面由 tools/mobile/server.py 经 adb reverse 提供（刻意不发 COOP/COEP）→ crossOriginIsolated=false、无 SharedArrayBuffer、navigator.locks=true —— 这三项由设备侧探针页自己 POST 上报（work/phone-probe/reports.jsonl），不是主机侧推断。solver-ap 是这台浏览器**首次**打开的源（IndexedDB 为空）→ 全程无缓存、从零算；solver-mixed-rounding 紧接着跑，界面自报「复用 2 张谱面」（续算缓存里同谱面同卡组的评分复用），求解本身完整跑完（complete=true、optimality_proven=true）。该机自带浏览器与 Via 均不开 WebView 调试口、夸克把页面渲染在自家内核里，故本轮为**人工点击 + 主机侧取证**（非 CDP 自动驱动）；判据与自动路径完全一致（compare.js 对原生 oracle）。导出落盘路径 /sdcard/Download/Browser/。"
 }

@@ -85,12 +85,15 @@ python -B tools/run_checks.py
 | `CDP_PORT` | devtools 转发端口（默认 9222），由 `driver.ps1` 设置 |
 | `MOBILE_CLEAR_STORAGE=1` | **每次 boot 前清空该源的全部存储**（IndexedDB 卡库 + 续算缓存 + Cache Storage）。要验「搜索本身能跑」就必须开；不开就会命中缓存，8 秒出结果（假绿灯） |
 | `MOBILE_FIXTURES` | 指定 fixture 目录，覆盖默认的 `work/validation` → `browser/work/fixtures` 查找顺序 |
-| `WATCH_URL` | 应用地址（默认 `http://localhost:8899/ournotes-planner/`） |
+| `WATCH_URL` | 应用地址（默认 `http://localhost:8899/ournotes-planner/`）；`driver.ps1 -Url` 会自动把它设成同一个值 |
 | `WATCH_NO_RELOAD=1` | 不 reload，直接连现在的页面（调试用） |
+| `MOBILE_RELOAD_BYPASS_CACHE=1` | reload 时**绕过 HTTP 缓存**（`ignoreCache:true`）。默认**不绕过**——理由见坑 27：一次冷启动要下 ~27 MB，绕过缓存等于每次 reload 重下一遍，窄链路下永远下不完。要验冷启动/资源新鲜度时才开 |
+| `MOBILE_JSON_TRIES` | `/json` 的重试次数（默认 240 次 × 2.5 秒 = 10 分钟），见坑 26 |
 | `DOWNLOAD_WAIT_MS` | `download_test.js` 点了导出之后等多久看反应（默认 20000） |
 
 `driver.ps1` 的开关：`-Reopen`（先强杀浏览器再起来，**用例之间建议开**，见坑 13）、
-`-Offline`（不重建隧道，调试用）、`-WebPort` / `-CdpPort` / `-Url` / `-BrowserPkg` / `-BrowserAct`。
+`-Offline`（不重建隧道，调试用）、`-StepRetries`（node 步骤失败后重试几次，默认 1；重试前会硬刷隧道）、
+`-WebPort` / `-CdpPort` / `-Url` / `-BrowserPkg` / `-BrowserAct`。
 
 ## 文件一览
 
@@ -228,6 +231,8 @@ python -B tools/run_checks.py
     ⚠️ 只记「观察到一次、原因未定性」——**别拿它当结论**；它和第 1 条的反诈弹窗表现很像，
     先看屏幕有没有模态框。另外 `-Reopen` 之后首次还会弹**「服务协议和隐私政策」**（拒绝/同意），
     `driver.ps1` 只自动点掉「我已了解」「不再提醒」这两类，这个得自己 `tap 同意`（或 force-stop 重来）。
+    ⚠️ 更要先排除**第 25 条**：`Runtime.enable 超时` 也可能是主机端口被别的程序占着，
+    那样连的根本不是手机 —— 一句 `curl 127.0.0.1:<port>/json/version` 就能定性，比在手机上找快得多。
 24. **`/json` 通不代表 WS 通，反过来也一样**：`driver.ps1` 一被 Ctrl-C/被杀，它持有的
     `adb forward tcp:9222` 与 `reverse tcp:8899` 会立刻消失（watchdog 也随进程没了），于是
     `cdp.js dump` 报 `ws error: unknown`、`/json` 直接连不上 —— 这**不是**页面坏了。
@@ -237,3 +242,73 @@ python -B tools/run_checks.py
     adb -s <serial> reverse tcp:8899 tcp:8899
     ```
     `webview_devtools_remote_<pid>` 里的 `<pid>` 就是 `pidof com.mmbox.xbrowser` 的输出。
+
+25. **默认端口 9222 可能被本机别的程序占着 —— 而且它装得比手机还像**（2026-10-05 卡了一整轮的元凶）：
+    **Adobe After Effects 的 UXP 调试端口默认就是 9222**（`curl 127.0.0.1:9222/json/version`
+    → `{"Browser":"Adobe UXP"}`）。这时 `adb forward tcp:9222 localabstract:…` 只回一句
+    `cannot bind listener: … 10048`，**forward 根本没建上**；而旧版 `driver.ps1` 照样打印
+    「forward tcp:9222 -> sock」，紧接着 `Wait-Cdp` 去 curl 9222 —— After Effects 的 devtools
+    **也回 `webSocketDebuggerUrl`、也列一个 `type=page` 的 target**，于是脚本大喊 `CDP READY`，
+    node 却连到了 After Effects 上：症状是 target 的 `url` 是**空串**、`document` 里什么都没有、
+    `Cannot find default execution context` / `Storage.clearDataForOrigin -32601` / 随后 WS「连不上」。
+    ⚠️ 这一整套看起来和「手机没导航」「模态框挡着」「WebView 卡死」**一模一样**，
+    当时连着几轮都在手机上找原因（`pm clear`、点弹窗、重启浏览器、换浏览器）——全是**查错了机器**。
+    现在 `driver.ps1` 的 `Ensure-Forward`：先探主机端口是否被占（`Test-HostPortBusy`），
+    建完再用 `forward --list` **核对 `tcp:<port> -> localabstract:<sock>` 这条映射真的在**，
+    不在就往后换端口（最多 12 个），实际端口写进 `CDP_PORT`；`Wait-Cdp` 也把 `Adobe UXP`
+    这个串当假货拒掉；watchdog 同样按整条映射核对，而不是只看端口出现过。
+    手动排查同理：**先 `curl 127.0.0.1:<port>/json/version`**，自称 `Adobe UXP` 就说明连的不是手机；
+    `/json` 里 target 的 `url` 是空串 = 十有八九是这个坑，真手机的 WebView 一定列出
+    `http://localhost:8899/ournotes-planner/`。
+
+26. **「映射在」≠「能用」；`/json` 超时别急着怪手机**（2026-10-05 云手机那轮的第二个坑）：
+    云手机掉线时 adb 会把本地监听**留着**、绑在已经死掉的 transport 上 —— `forward --list`
+    照样列出这条映射，可连进去只会 `socket hang up`，而「缺了再加一条」是**无效的**
+    （加的是同一条，adb 幂等忽略）。症状是 watchdog 每 3 秒补一次、CDP 十五分钟没应答。
+    现在 watchdog 每轮都**探一下** `/json`，探不通且设备在线满 ~60 秒就**硬重建** forward
+    （`forward --remove-all` + 重加；**只动 forward，绝不动 reverse** —— 页面可能正通过它下载）。
+    另外 `/json` 的重试窗口放宽到 10 分钟（`MOBILE_JSON_TRIES`）：云手机掉线是**成串**来的
+    （实测一分钟能掉 20 次），150 秒的窗口撑不过一串掉线，前面下的东西全白费。
+
+27. **一次冷启动要下 ~27 MB，别让 `reload` 每次都重下一遍**：
+    `pyodide.asm.wasm` 9.6 MB + ortools wasm 7~11 MB + stdlib + 运行时包。原来 `reloadPage()`
+    写死 `ignoreCache:true`，等于**每次 reload 都重下这 27 MB**；而测试服务器
+    （`tools/mobile/server.py`）又刻意发 `Cache-Control: no-store`，缓存一点都留不下 ——
+    窄链路（宿主机↔云手机实测 ~180 KB/s）下永远下不完，boot 次次超时。
+    现在 reload **默认不绕过** HTTP 缓存（`MOBILE_RELOAD_BYPASS_CACHE=1` 才绕过）。
+    这样做是安全的：资源名都带内容哈希（`assets/*-<hash>.wasm`），应用自己取的运行时 URL
+    也带 `?v=<runtime_sha256>` —— 换了构建就是**另一个 URL**，缓存里拿不到旧货。
+
+28. **真机上「取第一个 devtools socket」必然连错**：设备上同时开着别的 WebView
+    （实测用户手机上有一个「NapCat 监控」页面的 WebView）。而且**各家 socket 名不一样**：
+    云手机 X 浏览器是 `webview_devtools_remote_<pid>`，真机夸克是
+    `huawei_webview_devtools_remote_<pid>`。现在 `Find-AppDevtools()` 按
+    `*devtools_remote_<pid>` 收全集，逐个 forward 上去 **看 `/json` 里有没有应用页**，
+    认错了就把那条映射撤掉。
+
+29. **不是每台手机都能自动驱动**：实测 HUAWEI HBN-AL80（HarmonyOS / Android 12）上
+    **自带浏览器（华为浏览器 17.0.8.310，ArkWeb）和 Via 都不开 WebView 调试口**
+    （`setWebContentsDebuggingEnabled` 没开，socket 根本不存在）；夸克虽然开，
+    但它把页面渲染在**自家内核**里，系统 WebView 那个 target 的 `description` 是
+    `"visible":false`、DOM 里没有应用的元素 —— 连上去只会「探测：hasApp=false」。
+    **这种机器只能走「人工操作 + 主机侧取证」**：人点，主机负责 push 测试卡库、
+    截图、拉导出结果，再拿 `compare.js` 对原生 oracle 比对。判据一个字不变，
+    只是「谁点的」从 CDP 变成人；凭据里的 `notes` 要如实写明。
+
+30. **把卡库 JSON 送进手机，光 `adb push` 不够**：应用对导入文件限定了
+    `accept=".json,application/json"`，而华为文件选择器的「下载」根目录是按
+    **MediaStore 的 mime** 判断的 —— adb 推的文件没登记，它显示成「**BIN 文件**」并**灰掉**。
+    两件事都要做：① 文件名用 **ASCII**（中文名在「下载」根目录里会被截断、mime 也认不出）；
+    ② 推完补一发 `am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///…`
+    （之后 `content query --uri content://media/external/file` 里就是 `mime_type=application/json`）。
+    放在 `/sdcard/Documents/` 也有一份（那个根目录按扩展名认类型）。
+
+31. **息屏会让 WebView 冻结，CDP 全线 30 秒超时**：驱动跑着的时候如果手机自己息屏，
+    页面变 `hidden`，Chromium 把标签冻住，于是每条 `Runtime.evaluate` 都
+    `超时 30000ms`（而 CPU 是闲的 —— 这两件事一起出现就是这个坑，不是应用卡死）。
+    跑之前先 `adb shell svc power stayon true`（插着 USB 时会保持常亮）+
+    `input keyevent KEYCODE_WAKEUP`；测试期间也别切走页面。
+
+32. **不是所有手机都有 `curl`**：HarmonyOS（HBN-AL80）只有 toybox，`driver.ps1` 里
+    「手机侧 curl 拉 index.html」那条自检会拿到 `inaccessible or not found` ——
+    现在这种输出**只记一行、不当失败**（真正准的判据是应用能不能 boot 出来）。

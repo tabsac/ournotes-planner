@@ -26,6 +26,13 @@ const {Session, OUT_DIR} = require('./app-client');
 const FIXTURE = process.argv[2] || 'solver-ap';
 const MAX_MINUTES = Number(process.argv[3] || 20);
 const OUT = path.join(OUT_DIR, 'watch-' + FIXTURE + '.jsonl');
+const RESULT = path.join(OUT_DIR, `result-${FIXTURE}.json`);
+
+// ⚠️ 开跑先删掉上一次的结果文件。为什么：`driver.ps1` 会**无条件**接着跑 `compare.js`，
+//    而 compare 只认「这个路径上有没有文件」—— 一旦本轮 watch 失败，留下的旧文件会被拿去比对，
+//    打出 PASSED（2026-10-05 真踩过：watch 明明失败了，下一行却是「PASSED solver-mixed-rounding」，
+//    比的是 6 小时前那份结果）。删掉之后失败就是失败，不会伪装成绿灯。
+try { fs.unlinkSync(RESULT); } catch (error) { /* 本来就没有 */ }
 
 const session = new Session({label: 'watch', talkative: true});
 const trace = [];           // 主机侧采样，落盘成 watch-<fixture>.jsonl
