@@ -18,6 +18,16 @@
 - **验证**：全量验收 `passed=true`；重建后 worker chunk = `python-worker-CqrEKq27.js`。
 - 顺带说明：`service-worker.js` 是**纯网络**的（只注入隔离头、不缓存），所以陈旧只可能来自 HTTP 缓存这一层。
 - 部署影响：`index.html` + 5 个 `assets/*.js`（内容哈希换名，旧的 5 个要删）；`build-info.json` 不变。
+- **上线与真站点验收（服务器侧 + 我方独立复核，2026-10-05）**：6 个文件覆盖、旧 5 个 chunk 下架
+  （移到备份目录不硬删）、`build-info.json` / `planner-runtime.zip` / APK 三份没动。
+  最硬的证据是 **nginx 访问日志里浏览器真发出的请求**：旧 `GET /planner-runtime.zip?v=0.3.2`
+  （2,729,597 B）→ 新 `GET /planner-runtime.zip?v=2246431733…4abcb8`（2,764,042 B）。
+  我方复核：正式站新 chunk **200** / 旧 chunk **404** / `planner-runtime.zip` 与 APK **200** /
+  线上 `assets/python-worker-CqrEKq27.js` 里 `runtime_sha256` 与 `cache:"no-cache"` **都在**；
+  镜像站 `index.html` 也已指向 `assets/index-Bj_mem9l.js`。
+  回滚点（服务器侧）：`/home/admin/bot/data/backup-webfiles-2026-10-05/`。
+- 顺带记一条运维事实（服务器侧提供，我这边核对过）：**镜像站是项目页** ——
+  `https://tabsac.github.io/` 根路径 **404**，判断镜像版本要走 `/ournotes-planner/`。
 
 ## 数据更新 — 2026-10-05（网页代码未改，版本号仍是 0.3.2）
 
