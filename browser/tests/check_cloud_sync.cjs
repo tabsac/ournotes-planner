@@ -774,9 +774,42 @@ const click = async (page, selector, settle = 700) => {
                 "[C2] 没有 kind 的历史 b25 记录也要能被自动应用（否则老用户切回来是空的）",
                 legacyApplied ? `${legacyApplied} 张卡` : "本机没有 b25 数据");
 
+            // [C3] 边界：**无特征的怪 payload → unknown**，而且**不许被自动应用**（别硬塞进 b25/卡库）。
+            //      这条对着服务端的 13 项矩阵：嗅探是子串判断，万一payload 里恰好出现那些词就会被误判；
+            //      反过来，真无特征的记录必须老实待在 unknown，不能被客户端当成"最新一条 b25"装进来。
+            const oddUser = USERNAME + "_odd";
+            const oddReg = await (await api("/api/register", {method: "POST",
+                body: JSON.stringify({username: oddUser, password: PASSWORD})})).json();
+            const oddPayload = {weird: true, n: 42, note: "no characteristic keys at all"};
+            const oddCreated = await (await api("/api/results", {method: "POST",
+                headers: {Authorization: "Bearer " + oddReg.token},
+                body: JSON.stringify({title: "怪 payload", summary: "无特征", payload: oddPayload})})).json();
+            const oddList = await (await api("/api/results",
+                {headers: {Authorization: "Bearer " + oddReg.token}})).json();
+            check(oddList?.[0]?.kind === "unknown",
+                "[C3] 无特征 payload 在列表里如实报 unknown（与服务端同规则）",
+                `kind=${oddList?.[0]?.kind ?? "(没这个字段)"} id=${oddCreated?.id ?? "?"}`);
+            const ctxOdd = await browser.newContext({viewport: {width: 412, height: 915}});
+            await ctxOdd.addInitScript(value => {
+                localStorage.setItem("ournotes-cloud-token", value.token);
+                localStorage.setItem("ournotes-cloud-api-base", value.apiBase);
+            }, {token: oddReg.token, apiBase: API_BASE});
+            const odd = await openApp(ctxOdd);
+            await odd.page.waitForTimeout(6000);              // 给自动同步足够时间去"乱装"
+            const oddState = await odd.page.evaluate(() => {
+                const key = Object.keys(localStorage).find(k => k.startsWith("ournotes-b25-v1"));
+                const record = key ? JSON.parse(localStorage.getItem(key)) : null;
+                return {b25: record?.entries?.length ?? 0,
+                        profile: document.getElementById("profileName")?.textContent.trim() ?? null,
+                        owned: document.getElementById("ownedCount")?.textContent.trim() ?? null};
+            });
+            check(oddState.b25 === 0 && oddState.profile === "我的卡库" && oddState.owned === "0 + 0",
+                "[C3] unknown 的记录不会被自动应用（本机仍是干净的默认卡库）",
+                `b25=${oddState.b25} 卡库名=${oddState.profile} 计数=${oddState.owned}`);
+
             check(phone.bad.filter(t => !syncNoise(t)).length === 0, "自动同步这一段手机端没有意外报错",
                 phone.bad.filter(t => !syncNoise(t)).slice(0, 3).join(" | "));
-            await ctxPhone.close(); await ctxLegacy.close(); await ctxPc.close();
+            await ctxPhone.close(); await ctxLegacy.close(); await ctxOdd.close(); await ctxPc.close();
         }
     } catch (error) {
         console.error("!!! 失败:", error.message);

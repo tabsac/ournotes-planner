@@ -100,18 +100,22 @@ const newToken = () => crypto.randomBytes(32).toString("base64url");   // 43 字
 const accountPublic = a => ({id: a.id, username: a.username, qq: a.qq ?? null, createdAt: a.createdAt});
 
 /**
- * 这条结果是什么 kind —— **与真实服务端同一条规则**（服务器侧 2026-10-05 的修复单 §3.1）：
- *   1. `payload.kind` 优先；
- *   2. 老数据（还没有 kind 的那些）按形状嗅探：有 `document` → profile；有 `entries` / `playerName` → b25。
- * 假后端必须跟着回 `kind`，否则「客户端按 kind 找最新一条」这条链路在替身上永远测不出来
- * （修完了也过不了，等于白写用例）。
+ * 这条结果是什么 kind —— **与真实服务端同一条规则**（服务器侧 `planner_api.py` 的 `result_kind()`，
+ * 见修复单 §6）：
+ *   1. payload 里出现 `"kind":"<x>"`（正则容忍冒号后空格）→ 原样透出；
+ *   2. 否则含 `"document"` → profile；
+ *   3. 否则含 `"entries"` 或 `"playerName"` → b25；
+ *   4. 否则 → **`unknown`**（不是 null）。
+ * 只看 payload 前 64 KB、不整段解析 —— 嗅探是**子串**判断，所以 payload 里恰好出现这些词就会命中。
+ * 假后端必须逐字对齐：不然「替身绿、线上红」（或反过来）都测不出来。
  */
 function sniffKind(payload) {
-    if (!payload || typeof payload !== "object") return null;
-    if (typeof payload.kind === "string" && payload.kind) return payload.kind;
-    if (payload.document) return "profile";
-    if (Array.isArray(payload.entries) || typeof payload.playerName === "string") return "b25";
-    return null;
+    const text = JSON.stringify(payload === undefined ? null : payload).slice(0, 64 * 1024);
+    const explicit = /"kind"\s*:\s*"([^"]+)"/.exec(text);
+    if (explicit) return explicit[1];
+    if (text.includes("document")) return "profile";
+    if (text.includes("entries") || text.includes("playerName")) return "b25";
+    return "unknown";
 }
 
 /** 服务端侧的敏感字段剔除（红线：只存可公开结果）。 */
