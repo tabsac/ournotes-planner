@@ -1,7 +1,7 @@
 {
   "schema": "ournotes-mobile-verification/1",
   "verified": true,
-  "checked_at": "2026-10-05T18:28:23+08:00",
+  "checked_at": "2026-10-05T18:38:02+08:00",
   "device": {
     "serial": "33Z0224521011939",
     "model": "HBN-AL80",
@@ -19,7 +19,12 @@
   },
   "app": {
     "browser_version": "0.3.2",
-    "core_version": "0.2.5"
+    "core_version": "0.2.5",
+    "build": {
+      "runtime_sha256": "2246431733fec33afce80945c7304a3d3d91b9af1be04111479d670e9e4abcb8",
+      "manifest_sha256": "a9718951322e1fb5b87cc38ef462aa851555e58b28cd5925b389c24238ab1c3b",
+      "static_file_count": 361
+    }
   },
   "cases": [
     {
@@ -133,5 +138,5 @@
       }
     }
   ],
-  "notes": "真机 HUAWEI HBN-AL80（HarmonyOS / Android 12、SDK 31）**自带浏览器**（com.huawei.browser 17.0.8.310）上，走应用自己的路径：导入卡库 → 开始计算 → 导出本次结果；导出文件用 adb 取回，再与原生 oracle 逐字段比对。页面由 tools/mobile/server.py 经 adb reverse 提供（刻意不发 COOP/COEP）→ crossOriginIsolated=false、无 SharedArrayBuffer、navigator.locks=true —— 这三项由设备侧探针页自己 POST 上报（work/phone-probe/reports.jsonl），不是主机侧推断。solver-ap 是这台浏览器**首次**打开的源（IndexedDB 为空）→ 全程无缓存、从零算；solver-mixed-rounding 紧接着跑，界面自报「复用 2 张谱面」（续算缓存里同谱面同卡组的评分复用），求解本身完整跑完（complete=true、optimality_proven=true）。该机自带浏览器与 Via 均不开 WebView 调试口、夸克把页面渲染在自家内核里，故本轮为**人工点击 + 主机侧取证**（非 CDP 自动驱动）；判据与自动路径完全一致（compare.js 对原生 oracle）。导出落盘路径 /sdcard/Download/Browser/。"
+  "notes": "真机 HUAWEI HBN-AL80（HarmonyOS / Android 12、SDK 31）**自带浏览器**（com.huawei.browser 17.0.8.310）上，走应用自己的路径：导入卡库 → 开始计算 → 导出本次结果；导出文件用 adb 取回，再与原生 oracle 逐字段比对。页面由 tools/mobile/server.py 经 adb reverse 提供（刻意不发 COOP/COEP）→ crossOriginIsolated=false、无 SharedArrayBuffer、navigator.locks=true —— 这三项由设备侧探针页自己 POST 上报（work/phone-probe/reports.jsonl），不是主机侧推断。solver-ap 是这台浏览器**首次**打开的源（IndexedDB 为空）→ 全程无缓存、从零算；solver-mixed-rounding 紧接着跑，界面自报「复用 2 张谱面」（续算缓存里同谱面同卡组的评分复用），求解本身完整跑完（complete=true、optimality_proven=true）。该机自带浏览器与 Via 均不开 WebView 调试口、夸克把页面渲染在自家内核里，故本轮为**人工点击 + 主机侧取证**（非 CDP 自动驱动）；判据与自动路径完全一致（compare.js 对原生 oracle）。导出落盘路径 /sdcard/Download/Browser/。凭据额外钉了构建摘要（app.build：runtime_sha256 + 静态文件清单哈希），门禁据此判定「这份凭据是否对应当前构建」。"
 }

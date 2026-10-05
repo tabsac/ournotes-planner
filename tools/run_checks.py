@@ -15,6 +15,10 @@ ROOT = Path(__file__).resolve().parents[1]
 MOBILE_EVIDENCE = Path(os.environ.get("OURNOTES_MOBILE_EVIDENCE")
                        or ROOT / "browser/tests/mobile-verification.json")
 
+# 构建摘要：与生产者（tools/mobile/make_mobile_evidence.py）共用同一份实现。
+sys.path.insert(0, str(ROOT / "tools" / "mobile"))
+from build_digest import build_digest  # noqa: E402
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--port", type=int, default=8878)
 args = parser.parse_args()
@@ -27,8 +31,15 @@ def run(command):
     subprocess.run(command, cwd=ROOT, env=env, check=True)
 
 
-def load_mobile_evidence(browser_version):
-    """返回 (是否可信, 明细)。明细里永远带一个 reason 说明依据。"""
+def load_mobile_evidence(browser_version, build):
+    """返回 (是否可信, 明细)。明细里永远带一个 reason 说明依据。
+
+    ⚠️ 两道门都要过：**版本号** + **构建摘要**。
+    为什么非要第二道：门禁原来只比 `browser_version`，而 2026-10-05 在同一个 0.3.2 下改了三次构建
+    （运行期数据补谱面、JS 缓存键、APK）—— 于是凌晨那份 `verified=true` 继续冒充「线上这份验过了」，
+    版本号对得上，谁也不会发现。摘要（`runtime_sha256` + 静态文件清单哈希）一改就变，
+    「换了构建就得重跑真机」这件事才真的被强制住。
+    """
     if not MOBILE_EVIDENCE.exists():
         return False, {"verified": False, "evidence_file": str(MOBILE_EVIDENCE.relative_to(ROOT)),
                        "reason": "没有入库的真机验证凭据"}
@@ -46,7 +57,19 @@ def load_mobile_evidence(browser_version):
         evidence["reason"] = (f"凭据是针对 browser {recorded} 的真机验证，"
                               f"当前 browser 是 {browser_version} —— 需要重跑一次真机")
         return False, evidence
-    evidence["reason"] = "凭据与当前 browser 版本一致"
+    recorded_build = (evidence.get("app") or {}).get("build")
+    if not recorded_build:
+        evidence["reason"] = ("凭据里没有构建摘要（旧格式）—— 无法确认它对应的是当前这份构建，"
+                              "需要按 tools/mobile/README.md 重跑一次真机")
+        return False, evidence
+    for key, label in (("runtime_sha256", "运行期数据"), ("manifest_sha256", "静态文件清单")):
+        if recorded_build.get(key) != (build or {}).get(key):
+            evidence["reason"] = (f"凭据的{label}摘要与当前构建不一致"
+                                  f"（凭据 {str(recorded_build.get(key))[:16]}… vs "
+                                  f"当前 {str((build or {}).get(key))[:16]}…）"
+                                  "—— 「版本号没动但构建变了」，需要重跑一次真机")
+            return False, evidence
+    evidence["reason"] = "凭据与当前 browser 版本、构建摘要都一致"
     return True, evidence
 
 
@@ -70,8 +93,10 @@ try:
     if not all(report["passed"] for report in reports.values()):
         raise RuntimeError("One or more checks failed")
     browser_version = json.loads((ROOT / "browser/package.json").read_text("utf-8"))["version"]
-    mobile_verified, mobile_detail = load_mobile_evidence(browser_version)
+    current_build = build_digest(json.loads((ROOT / "browser/dist/build-info.json").read_text("utf-8")))
+    mobile_verified, mobile_detail = load_mobile_evidence(browser_version, current_build)
     summary = {"passed": True, "browser_version": browser_version,
+               "current_build": current_build,
                "core_version": reports["score-oracle"]["core_version"],
                "browser_checks": reports["browser"]["reports"], "lifecycle_checks": reports["lifecycle"]["reports"],
                "review_checks": reports["review"]["reports"], "image_checks": reports["images"]["reports"],

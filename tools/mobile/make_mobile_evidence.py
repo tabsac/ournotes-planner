@@ -34,6 +34,10 @@ REPO_ROOT = HERE.parents[1]                     # 仓库根
 OUT_DIR = Path(os.environ.get("MOBILE_OUT_DIR") or REPO_ROOT / "work" / "mobile")
 DEFAULT_REPO = REPO_ROOT
 
+# 构建摘要（与 tools/run_checks.py 共用同一份实现，别让两边算法分叉）
+sys.path.insert(0, str(HERE))
+from build_digest import build_digest, describe  # noqa: E402
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--app-dir", default=str(DEFAULT_REPO), help="ournotes-team-planner-web 目录")
 parser.add_argument("--out", default=None, help="凭据输出路径，默认 <app>/browser/tests/mobile-verification.json")
@@ -105,6 +109,7 @@ if args.cancel_result:
     cases.append(case)
 
 verified = bool(cases) and all(case["ok"] for case in cases)
+digest = build_digest(build_info)
 evidence = {
     "schema": "ournotes-mobile-verification/1",
     "verified": verified,
@@ -117,7 +122,10 @@ evidence = {
         "shared_array_buffer": args.shared_array_buffer == "true",
         "navigator_locks": args.navigator_locks == "true",
     },
-    "app": {"browser_version": build_info.get("browser_version"), "core_version": build_info.get("core_version")},
+    "app": {"browser_version": build_info.get("browser_version"), "core_version": build_info.get("core_version"),
+            # 构建摘要：门禁除了比版本号，还要比这个 —— 否则「同一个版本号下换了构建」时
+            # 一个旧的 True 会继续冒充「这份构建验过了」（2026-10-05 亲历）。
+            "build": digest},
     "cases": cases,
     "notes": args.notes or "云手机（无跨源隔离）上走应用自己的路径「导入 → 计算 → 导出」，与原生 oracle 逐条比对",
 }
@@ -130,5 +138,6 @@ for case in cases:
     if case.get("compare_output"):
         for line in case["compare_output"]:
             print("    " + line)
+print(f"构建摘要（写进凭据）: {describe(digest)}")
 print(f"\nverified={verified}  ->  {OUT}")
 sys.exit(0 if verified else 1)

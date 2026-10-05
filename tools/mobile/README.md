@@ -15,6 +15,15 @@
 `tools/run_checks.py` 里的 `real_mobile_device_verified` **不是写死的**：它读上面那份凭据，
 并且要求凭据里的 `app.browser_version` 与当前 `browser/package.json` 一致 —— 改了版本，旧凭据自动失效。
 
+**⚠️ 光比版本号不够（2026-10-05 补的第二道门）**：当天在**同一个 0.3.2** 下改了三次构建
+（运行期数据补谱面、JS 缓存键、APK），于是凌晨那份 `verified=true` 继续冒充「线上这份验过了」——
+版本号对得上，谁也不会发现它其实指的是 11:xx 那份。
+现在凭据里还钉了**构建摘要**（`app.build`，由 `tools/mobile/build_digest.py` 算）：
+`runtime_sha256`（运行期数据）+ `manifest_sha256`（`build-info.json` 里 `static_files` 全量内容哈希的规范化哈希）。
+`tools/run_checks.py` 会用**当前 dist** 重算一遍并比对，任一处不同就判 False、写明「版本号没动但构建变了，需要重跑真机」。
+摘要生产者与消费者共用 `build_digest.py` 一份实现，免得两边算法悄悄分叉；
+`check_evidence_gate.py` 里专门有两条用例盯着它（摘要不符 / 旧格式没有摘要，都必须 False）。
+
 ## 为什么需要一个「凭据」，而不是在 CI 里跑
 
 CI 上没有手机（也没有能装 X 浏览器/WebView 的宿主），所以真机这件事没法在流水线上诚实表达。
@@ -28,7 +37,10 @@ CI 上没有手机（也没有能装 X 浏览器/WebView 的宿主），所以�
 ## 复现步骤
 
 前置：一台开了 adb 调试的手机（或云手机），手机上装了会用**系统 WebView** 的浏览器。
-本仓库验证过的是 Android 11 + WebView 124 + X 浏览器（`com.mmbox.xbrowser`）。
+本仓库验证过两台：
+* 云手机 PCHM30 / Android 11 / WebView 124 / X 浏览器（`com.mmbox.xbrowser`）—— **能自动驱动**；
+* 真机 HUAWEI HBN-AL80 / HarmonyOS / Android 12 / 自带浏览器（`com.huawei.browser` 17.0.8.310）
+  —— **不能自动驱动**，走「人工点击 + 主机侧取证」，见下面坑 29 的流程说明。
 
 ```powershell
 # 0. 起一个**不发跨源隔离头**的静态服务（这正是要复现的环境）
@@ -109,8 +121,9 @@ python -B tools/run_checks.py
 | `cdp_probe.js` | 分层探针：`/json` → WebSocket 握手 → 浏览器进程命令 → 渲染器命令，用来判断「卡在哪一层」 |
 | `ws_probe.js` | 手工发 Upgrade、把服务端回的状态行/响应头原样打出来 |
 | `elapsed_trace.py` | 分析进度轨迹，判「同一阶段里秒数是否在推进」 |
-| `make_mobile_evidence.py` | 把一次真机跑动的产出整理成 `browser/tests/mobile-verification.json` |
-| `check_evidence_gate.py` | 门禁诚实性小测：正常 / 版本不符 / 自称未通过 / 缺文件，四种情况各应得到什么 |
+| `make_mobile_evidence.py` | 把一次真机跑动的产出整理成 `browser/tests/mobile-verification.json`（连**构建摘要**一起写进去） |
+| `build_digest.py` | 构建摘要的实现（`runtime_sha256` + 静态文件清单哈希）：生成器与 `tools/run_checks.py` **共用这一份**，免得两边算法分叉 |
+| `check_evidence_gate.py` | 门禁诚实性小测：正常 / 版本不符 / **摘要不符（旧构建）** / **旧格式没有摘要** / 自称未通过 / 缺文件，六种情况各应得到什么 |
 | `server.py` | 不发隔离头的静态服务（复现手机自带浏览器的环境） |
 | `coi_server.py` | 发真 COOP/COEP 的对照服务，用来单独验证「这个浏览器到底能不能隔离」 |
 
@@ -293,7 +306,26 @@ python -B tools/run_checks.py
     `"visible":false`、DOM 里没有应用的元素 —— 连上去只会「探测：hasApp=false」。
     **这种机器只能走「人工操作 + 主机侧取证」**：人点，主机负责 push 测试卡库、
     截图、拉导出结果，再拿 `compare.js` 对原生 oracle 比对。判据一个字不变，
-    只是「谁点的」从 CDP 变成人；凭据里的 `notes` 要如实写明。
+    只是「谁点的」从 CDP 变成人；凭据里的 `notes` 要如实写明。实测流程（HBN-AL80 那轮）：
+
+    ```powershell
+    # 0. 起服务 + 反隧道（手机没有 curl 也没关系）
+    python -u tools/mobile/server.py --port 8899
+    adb -s <serial> reverse tcp:8899 tcp:8899
+
+    # 1. 把 fixture 里的 request 落成卡库文件，推进手机（**ASCII 名 + 媒体扫描**，见坑 30）
+    #    /sdcard/Download/ournotes-fixture-<case>.json
+    # 2. adb 打开应用页（用自带浏览器的 package/activity），人点：导入卡库 → 开始计算 → 导出本次结果
+    # 3. 导出落在 /sdcard/Download/Browser/（自带浏览器自己的子目录），拉回来当 result-<case>.json
+    adb -s <serial> pull "/sdcard/Download/Browser/OurNotes-收益与乐曲方案.json" work/mobile/result-solver-ap.json
+    node tools/mobile/compare.js solver-ap work/mobile/result-solver-ap.json
+    # 4. 环境三项（crossOriginIsolated / SharedArrayBuffer / locks）拿不到 CDP 就问页面要：
+    #    起第二个 server（--dir 指向一个只放探针页的目录 --sink 指向 work/），让自带浏览器打开探针页，
+    #    页面自己 POST 上报 → 主机读 jsonl。这样「没有 SAB」是**设备自己说的**，不是主机推断的。
+    python tools/mobile/make_mobile_evidence.py --serial ... --model ... --android ... --sdk ... \
+      --webview ... --browser-package ... --cross-origin-isolated false --shared-array-buffer false \
+      --navigator-locks true --case solver-ap --case solver-mixed-rounding --notes '人工点击 + 主机侧取证…'
+    ```
 
 30. **把卡库 JSON 送进手机，光 `adb push` 不够**：应用对导入文件限定了
     `accept=".json,application/json"`，而华为文件选择器的「下载」根目录是按
