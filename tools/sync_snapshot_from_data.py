@@ -53,6 +53,7 @@ import hashlib
 import json
 import sys
 import urllib.request
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -65,6 +66,12 @@ DEFAULT_BASE = "https://on.tabsac.com"
 DIFFICULTIES = ("easy", "normal", "hard", "expert")
 REMOTE_CHART_NAME = {"easy": "EASY", "normal": "NORMAL", "hard": "HARD", "expert": "EXPERT"}
 MUSIC_ID_FIELD = {"easy": "_easyID", "normal": "_normalID", "hard": "_hardID", "expert": "_expertID"}
+
+# 快照根（research/<日期>/）与上游 zip 的前缀 —— 改 raw 母表时要回头去更新 manifest
+SNAPSHOT_REL = json.loads(INDEX.read_text("utf-8"))["snapshot_prefix"].rsplit("raw/", 1)[0]
+_UPSTREAM = json.loads((ROOT / "browser/upstream.json").read_text("utf-8"))
+UPSTREAM_ZIP = ROOT / "browser" / "upstream" / _UPSTREAM["archive"]
+UPSTREAM_PREFIX = "OurNotes-配队程序-v%s/" % _UPSTREAM["version"]
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -289,7 +296,50 @@ def apply_changes(raw_dir, remote_songs, report):
                 row["_startAt"] = after.get("startAt")
                 row["_endAt"] = after.get("endAt")
         write_table(raw_dir, "MasterEvent", event_wrapper, event_rows)
+    # ⚠️ 改了 raw 母表就必须同步更新 source_manifest.json 里记的 sha256 —— 运行期
+    # `manual_score_reference._checked_inputs()` 会逐张比对（不符直接拒绝加载整个快照：
+    # "Source checksum mismatch: raw/<表>.json"）。上游的 `update_snapshot.py` 就是这么做的
+    # （见 manifest 的 `browser_override` 说明），这里照同一条规矩。
+    patched = []
+    if touched:
+        patched.append("MasterLiveMusicScore")
+    if report["event"]:
+        patched.append("MasterEvent")
+    if patched:
+        update_manifest(raw_dir, patched)
     return touched, len(event_rows)
+
+
+def update_manifest(raw_dir, table_names):
+    """把被改过的 raw 表的新 sha256 写回 `source_manifest.json`（否则运行期会拒绝加载）。"""
+    manifest_rel = raw_dir.parent / "source_manifest.json"
+    if manifest_rel.is_file():
+        manifest = json.loads(manifest_rel.read_text("utf-8"))
+    else:                                   # 覆盖层里还没有：从上游 zip 取一份当底
+        archive = zipfile.ZipFile(UPSTREAM_ZIP)
+        manifest = json.loads(archive.read(UPSTREAM_PREFIX + SNAPSHOT_REL + "source_manifest.json").decode("utf-8"))
+    updated = []
+    for name in table_names:
+        path = raw_dir / (name + ".json")
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        for entry in manifest["files"]:
+            if entry.get("local_path") == "raw/%s.json" % name:
+                if entry.get("sha256") != digest:
+                    entry["sha256"] = digest
+                    entry["bytes"] = path.stat().st_size
+                    updated.append(entry["local_path"])
+                break
+    override = manifest.get("browser_override") or {}
+    override["note"] = ("raw 表由 update_snapshot.py / sync_snapshot_from_data.py 刷新，sha256 已同步更新"
+                        "（运行期 _checked_inputs() 会逐张核对这些 sha256）")
+    override["tables"] = len([e for e in manifest["files"]
+                              if str(e.get("local_path", "")).startswith("raw/")
+                              and (OVERRIDE / SNAPSHOT_REL / e["local_path"]).is_file()])
+    manifest["browser_override"] = override
+    manifest_rel.parent.mkdir(parents=True, exist_ok=True)
+    manifest_rel.write_text(json.dumps(manifest, ensure_ascii=False, indent=1) + "\n",
+                            encoding="utf-8", newline="\n")
+    return updated
 
 
 def write_record(base, version, report, touched):

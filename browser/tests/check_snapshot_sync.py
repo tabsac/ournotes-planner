@@ -12,9 +12,11 @@
   4. `write_table` 写出**逐字节相同**的文件 —— 格式一飘，`git diff` 会整篇变红，没法审；
   5. `verify_integrity`：清单与字节不符时必须判 False（不跟坏数据同步）。
 """
+import hashlib
 import importlib.util
 import json
 import sys
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -133,9 +135,13 @@ check("清单里没写 sha256 → 放行（无法校验≠不符）",
 print("[6] apply_changes 端到端（在 work/ 下的**副本**里写，绝不碰真快照）")
 import shutil  # noqa: E402
 
-sandbox = ROOT / "work/snapshot-sync-test"
-if sandbox.exists():
-    shutil.rmtree(sandbox)
+# 沙箱要照**真实目录形状**摆：<沙箱>/research/<日期>/raw/ —— 因为 update_manifest() 会写到
+# raw 的同级（source_manifest.json）。平铺的副本会让它写进 work/ 根，测试就测不到那条了。
+sandbox_root = ROOT / "work/snapshot-sync-test"
+if sandbox_root.exists():
+    shutil.rmtree(sandbox_root)
+sandbox = sandbox_root / Path(raw_dir).relative_to(Path(raw_dir).parents[2])   # .../research/<日期>/raw
+sandbox.parent.mkdir(parents=True, exist_ok=True)
 shutil.copytree(raw_dir, sandbox)
 before = {p.name: p.read_bytes() for p in sandbox.glob("*.json")}
 scores_before = {row["_id"]: row for row in sync.load_table(raw_dir, "MasterLiveMusicScore")[1]}
@@ -178,7 +184,28 @@ check("没碰过的表逐字节不变", all(
     if name not in ("MasterLiveMusicScore.json", "MasterEvent.json")))
 check("真快照没被这次测试改动（副本里写，原目录不动）", all(
     (raw_dir / name).read_bytes() == raw for name, raw in before.items()))
-shutil.rmtree(sandbox, ignore_errors=True)
+
+# ⚠️ 改 raw 母表必须同步更新 source_manifest.json 的 sha256，否则运行期
+#    `manual_score_reference._checked_inputs()` 会拒绝加载整个快照（Source checksum mismatch）。
+print("[7] 清单同步：改了 raw 表就要把新 sha256 写回 source_manifest.json")
+manifest_path = sandbox.parent / "source_manifest.json"
+check("沙箱里生成了 source_manifest.json", manifest_path.is_file(), manifest_path)
+if manifest_path.is_file():
+    manifest = json.loads(manifest_path.read_text("utf-8"))
+    entries = {e["local_path"]: e for e in manifest["files"]}
+    for table in ("raw/MasterLiveMusicScore.json", "raw/MasterEvent.json"):
+        want = hashlib.sha256((sandbox / Path(table).name).read_bytes()).hexdigest()
+        check("%s 的 sha256 已更新为改后的字节" % table,
+              entries.get(table, {}).get("sha256") == want, (entries.get(table) or {}).get("sha256", "缺失")[:16])
+    with zipfile.ZipFile(sync.UPSTREAM_ZIP) as archive:
+        original = json.loads(archive.read(sync.UPSTREAM_PREFIX + sync.SNAPSHOT_REL + "source_manifest.json").decode("utf-8"))
+    original_digest = {e["local_path"]: e["sha256"] for e in original["files"]}["raw/MasterLiveMusicScore.json"]
+    check("确实与上游清单里的旧值不同（不是没改）",
+          entries["raw/MasterLiveMusicScore.json"]["sha256"] != original_digest,
+          "%s → %s" % (original_digest[:12], entries["raw/MasterLiveMusicScore.json"]["sha256"][:12]))
+    check("browser_override 的说明提到了 sha256 已同步",
+          "sha256" in (manifest.get("browser_override") or {}).get("note", ""))
+shutil.rmtree(sandbox_root, ignore_errors=True)
 
 print()
 if problems:
