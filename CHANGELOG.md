@@ -18,6 +18,12 @@
   `docs/build-info.json`（镜像；只有 `static_files["downloads/ournotes-box.apk"]` 变了：
   `23ac198d…` → `2fddcfb5…`）。全量验收 `passed=true`，`docs` 与 `dist` 逐字节一致。
   交付件 `on-share/apk-fix-2026-10-05/`（两个文件 + `替换说明.md`），线上覆盖这两个文件即可。
+- **同一天的第二轮（用户真机上又报一条）**：`cat: …/files/ChatHistory/23500458854: Is a directory`
+  —— 同一类根因的第二个触发点（`stat -c %s` 对目录也会成功返回 4096，于是目录被当候选文件去 `cat`）。
+  真机按用户布局复现：旧包**逐字**复现该报错；第一次修复的包已能跳过（显示「跳过了 1 个」）但仍会去试；
+  **追加两处**后（新增 `isRegularFile()`，扫描只读普通文件；`SKIP` 加 `ChatHistory`）连「跳过」都不再出现。
+  最终 APK `1F4ACE01DE037699E8A55D31A9CF8C2B539C3A1CCD6B9A35F67C53D647F15910`，
+  同一套流程重建/验收/发布（差异仍只有那两个文件）。
 - 踩到的坑（省下一次）：**下载产物的源是 `browser/downloads/`，不是 `browser/public/downloads/`** ——
   `public/` 每次构建都被整个删除重建，往那儿放包会被构建还原（我第一次就放错了，白重建一次）。
 
