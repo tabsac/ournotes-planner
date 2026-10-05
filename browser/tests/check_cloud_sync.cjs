@@ -789,6 +789,14 @@ const click = async (page, selector, settle = 700) => {
             check(oddList?.[0]?.kind === "unknown",
                 "[C3] 无特征 payload 在列表里如实报 unknown（与服务端同规则）",
                 `kind=${oddList?.[0]?.kind ?? "(没这个字段)"} id=${oddCreated?.id ?? "?"}`);
+            // 契约守卫：**列表与单条必须报同一个 kind**。
+            // 服务端侧 §6 专门补过这一处（原来只有列表有 kind）—— 少一边就是"替身绿、线上红"，
+            // 所以这条断言盯的是**两边一致**，而不是某一处的具体取值。
+            const oddSingle = await (await api("/api/results/" + oddCreated.id,
+                {headers: {Authorization: "Bearer " + oddReg.token}})).json();
+            check(oddSingle?.kind === oddList?.[0]?.kind,
+                "[C3] 单条 GET 的 kind 与列表一致（服务端 §6① 补齐的那一处）",
+                `列表=${oddList?.[0]?.kind ?? "?"} 单条=${oddSingle?.kind ?? "(没这个字段)"}`);
             const ctxOdd = await browser.newContext({viewport: {width: 412, height: 915}});
             await ctxOdd.addInitScript(value => {
                 localStorage.setItem("ournotes-cloud-token", value.token);
