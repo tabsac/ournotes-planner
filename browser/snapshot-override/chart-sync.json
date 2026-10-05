@@ -1,0 +1,73 @@
+{
+ "schema": "ournotes-chart-sync/1",
+ "source": "https://on.tabsac.com",
+ "data_version": "2026-10-05",
+ "charts_manifest_sha256": "a94b800cbc27ee2dd257b24f754dc176de037a1a4fdd1d548a67ab2e8d89c511",
+ "added": [
+  {
+   "music_id": 100107,
+   "difficulty": "easy",
+   "source_sha256": "08c67d71a1d9490dd977ec1975492dd7f23d71225801ddf6004f4b1e23f50dbe",
+   "converted_record_sha256": "3addfb44c712b70c5c90dd4ea8702ea9fc681cd1ffa42235b33c6d3672f800da",
+   "judgement_count": 320,
+   "score_denominator": 169
+  },
+  {
+   "music_id": 100107,
+   "difficulty": "expert",
+   "source_sha256": "e085bfced787d9494cee72f7a914532f127e72b669397de9df0bf400dfcfbf78",
+   "converted_record_sha256": "5e7772ff9f4197554fff29e42edea1652a03ce7487d0c1c47498273cf2a77522",
+   "judgement_count": 960,
+   "score_denominator": 789
+  },
+  {
+   "music_id": 100107,
+   "difficulty": "hard",
+   "source_sha256": "26585ad328bbe49ed9c3c2d10c0bef5b8ec5b07f244e7cd0653a367856f5d48b",
+   "converted_record_sha256": "425498dacb407d14198339d1ac5bd24684643f280415b04c3ce775374ed890fd",
+   "judgement_count": 646,
+   "score_denominator": 451
+  },
+  {
+   "music_id": 100107,
+   "difficulty": "normal",
+   "source_sha256": "3bd6b8b1bed40d2b3066f8560626025de5f480352dd10fef522a2f02daf49875",
+   "converted_record_sha256": "47ddaf48905a14841edcd60f6f1852ca802eaa4e2809440322a25a747eaff40a",
+   "judgement_count": 499,
+   "score_denominator": 298
+  },
+  {
+   "music_id": 100112,
+   "difficulty": "easy",
+   "source_sha256": "424656a311ef1b4db5dd19ce34d158ee1723b455b1535ee59955b82659e792db",
+   "converted_record_sha256": "6dfec8dd6e774711d4c1872f4a3a6dae91a6060a35852cee1e84ba62ea0528ca",
+   "judgement_count": 323,
+   "score_denominator": 131
+  },
+  {
+   "music_id": 100112,
+   "difficulty": "expert",
+   "source_sha256": "dee406e9db72a3b0fc3a909e43e827bcbb8c522ed3d5e7e9d75f6fa07f1c94e5",
+   "converted_record_sha256": "9857e9d60044f218316a8d73bd87437133ea5f797f693a6768158ec4d1dc5307",
+   "judgement_count": 1144,
+   "score_denominator": 909
+  },
+  {
+   "music_id": 100112,
+   "difficulty": "hard",
+   "source_sha256": "c9bdace86bb6604b350823679cc8cb7935a64aeca1c9b066392d57ececd19c6c",
+   "converted_record_sha256": "320d2c3eff1e24bc01970c42ad07d08dbbb9df1051c71c2434c1c787f28c54de",
+   "judgement_count": 917,
+   "score_denominator": 660
+  },
+  {
+   "music_id": 100112,
+   "difficulty": "normal",
+   "source_sha256": "3223d39f74fb1c7a2df0d87c2bc4719e67760d514a1a764091fb83f5b198b688",
+   "converted_record_sha256": "56eb5660312465aef6b193176dfd451df5dd780d6e0fb71b5b4a33380ac74b63",
+   "judgement_count": 664,
+   "score_denominator": 414
+  }
+ ],
+ "gate": "all-existing-reproduced-byte-exact"
+}

@@ -2,7 +2,7 @@
   "browser_version": "0.3.2",
   "core_version": "0.2.5",
   "public_source_sha256": "396a5b670f8e15f7ce3e5582ca9ed114658d40de801f9d7233351027888ca914",
-  "runtime_sha256": "25892bf10a87e6898a641c0f536d694b367f8c9801f53a6831e68fd2d7b75916",
+  "runtime_sha256": "2246431733fec33afce80945c7304a3d3d91b9af1be04111479d670e9e4abcb8",
   "python_runtime": "Pyodide 314.0.7",
   "solver": "or-tools-wasm 0.9.1",
   "payload_files": [
@@ -480,7 +480,15 @@
     "browser_runtime.py",
     "cp_model.py",
     "account_import.py",
-    "account_scores.py"
+    "account_scores.py",
+    "research/2026-10-01/normalized/converted_charts/100107/easy.json",
+    "research/2026-10-01/normalized/converted_charts/100107/expert.json",
+    "research/2026-10-01/normalized/converted_charts/100107/hard.json",
+    "research/2026-10-01/normalized/converted_charts/100107/normal.json",
+    "research/2026-10-01/normalized/converted_charts/100112/easy.json",
+    "research/2026-10-01/normalized/converted_charts/100112/expert.json",
+    "research/2026-10-01/normalized/converted_charts/100112/hard.json",
+    "research/2026-10-01/normalized/converted_charts/100112/normal.json"
   ],
   "private_files_included": false,
   "snapshot_overrides": [
@@ -555,7 +563,18 @@
     "research/2026-10-01/raw/MasterTag.json",
     "research/2026-10-01/raw/MasterText.json",
     "research/2026-10-01/raw/MasterVipRankBonus.json",
-    "research/2026-10-01/source_manifest.json"
+    "research/2026-10-01/source_manifest.json",
+    "research/2026-10-01/validation/public_chart_conversion.json"
+  ],
+  "snapshot_added": [
+    "research/2026-10-01/normalized/converted_charts/100107/easy.json",
+    "research/2026-10-01/normalized/converted_charts/100107/expert.json",
+    "research/2026-10-01/normalized/converted_charts/100107/hard.json",
+    "research/2026-10-01/normalized/converted_charts/100107/normal.json",
+    "research/2026-10-01/normalized/converted_charts/100112/easy.json",
+    "research/2026-10-01/normalized/converted_charts/100112/expert.json",
+    "research/2026-10-01/normalized/converted_charts/100112/hard.json",
+    "research/2026-10-01/normalized/converted_charts/100112/normal.json"
   ],
   "static_files": {
     ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -903,7 +922,7 @@
     "licenses/protobufjs-LICENSE.txt": "49d6a1c9a623784c61c6cb70f773f3457faceb1914a13c8560a9823b7631950c",
     "licenses/Pyodide-LICENSE.txt": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
     "licenses/source_manifest.json": "8122385e57c61cde89d53f2772c84fbb1f57274a42423443de765e7fb064ea5f",
-    "planner-runtime.zip": "25892bf10a87e6898a641c0f536d694b367f8c9801f53a6831e68fd2d7b75916",
+    "planner-runtime.zip": "2246431733fec33afce80945c7304a3d3d91b9af1be04111479d670e9e4abcb8",
     "service-worker.js": "0a532405efe0789adb48bdafcd8a6ebda2565660658c5a6bf907112d587dc290",
     "static-data/b25-extra.json": "935559367616c2179841ccec7a27317bf02cbd047b7e2eae6917dd65b2fddea3",
     "static-data/snapshot-digest.json": "42bcf5288f0967d6bfe03febad797f070d554ce49aeabb52b81371e31a662a18",

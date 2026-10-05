@@ -221,6 +221,7 @@ def main():
     payload = io.BytesIO()
     included = []
     overridden = []
+    added = []                      # 覆盖层里新增（上游 zip 里没有）的文件，见下面的新增循环
     with zipfile.ZipFile(source) as archive, zipfile.ZipFile(payload, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as runtime:
         # 统一成 LF：上游包里的 html 是 CRLF，而 `write_text` 在 Windows 上会把 \n 再翻成 \r\n
         # → 产物变成 `\r\r\n`（每行多一个 CR）。浏览器不在乎，但会让「两份产物逐字节对比」
@@ -257,6 +258,24 @@ def main():
         for name in ("browser_runtime.py", "cp_model.py", "account_import.py", "account_scores.py"):
             add_runtime(runtime, name, (HERE / name).read_bytes())
             included.append(name)
+        # 覆盖层里**新增**的文件（上游 zip 里本来没有的）。
+        # 为什么必须支持：新曲目的谱面 `normalized/converted_charts/<id>/<难度>.json` 与补齐后的
+        # 转换报告就是「新文件」——只替换同名条目的话，报告会说这首可玩、谱面却不在包里，
+        # 用户选中它就炸（tools/sync_charts_from_data.py 生成的正是不存在的文件）。
+        snapshot_root = Path(SNAPSHOT_INDEX["snapshot_prefix"]).parent.as_posix() + "/"
+        for path in sorted((HERE / "snapshot-override" / snapshot_root).rglob("*")):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(HERE / "snapshot-override").as_posix()
+            if relative in included:
+                continue
+            if ".." in Path(relative).parts:
+                raise ValueError("Invalid override path")
+            if any(word in relative for word in ("player_growth_observations", "party_sample", "challenge_receipt", "private", ".sqlite", "ui-exported")):
+                raise ValueError("Private file in override")
+            add_runtime(runtime, relative, patch_runtime_source(relative, path.read_bytes()))
+            included.append(relative)
+            added.append(relative)
     (PUBLIC / "planner-runtime.zip").write_bytes(payload.getvalue())
     # 角色立绘 / 道具图标（本地生成，随网页提供，无外链）
     for image_dir, src_dir in (("character-images", "character"), ("item-images", "facility"),
@@ -584,6 +603,7 @@ window.PlannerAccount = {
               "python_runtime": "Pyodide 314.0.7", "solver": "or-tools-wasm 0.9.1",
               "payload_files": included, "private_files_included": False,
               "snapshot_overrides": sorted(overridden),
+              "snapshot_added": sorted(added),
               "static_files": {p.relative_to(PUBLIC).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
                                for p in sorted(PUBLIC.rglob("*")) if p.is_file() and p.name != "build-info.json"}}
     (PUBLIC / "build-info.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), "utf-8")

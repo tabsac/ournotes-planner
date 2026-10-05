@@ -1,5 +1,30 @@
 # 变更记录
 
+## 数据更新 — 2026-10-05（网页代码未改，版本号仍是 0.3.2）
+
+**谱面补全：100107 / 100112 两首曲子接进求解器**（服务器侧开放 `/data/charts/` 之后）。
+
+- **背景**：求解器的**可玩曲目清单来自转换报告** `validation/public_chart_conversion.json`
+  （`planner_core` 从它取 `song_ids`），运行期读的是 `normalized/converted_charts/<曲目id>/<难度>.json`。
+  之前快照有 **87** 首曲目、却只有 **85** 首有谱面 → **那两首在配队求解里根本不可选**
+  （B25 卡片只看等级，不受影响，所以一直没暴露）。
+- **新增 `tools/sync_charts_from_data.py`**：拉 `/data/charts.json` → 用上游 zip 里**钉住的参考实现**
+  （`chart_converter_reference`，逐文件核对 sha256）转成运行期格式 → 写进
+  `snapshot-override/…/normalized/converted_charts/` 并补转换报告条目。
+  * **闸门**：先把**已有的 340 份**逐字节复现（`converted_record_sha256` 全等）才允许写新谱面；
+    首次跑 **340/340 相符**。写盘前还照抄运行期自己的自检（判定数 == `_fullComboCount`、
+    每个判定 op 在 `MasterLiveNoteParameter` 里有因子、`skillEvents` 恰好 5 个不同非负整数…），不合格**拒写**。
+- **构建期补一处能力**：`snapshot-override` 里**新增**的文件现在也会进 runtime ——
+  以前只替换 zip 里的同名文件，新谱面会被**静默丢掉**（报告说可玩、包里却没有）；build-info 新增 `snapshot_added`。
+- **结果**：runtime 里 `converted_charts` **340 → 348**、可玩曲目 **85 → 87**；两首新歌四个难度都能算出
+  （除数 169/298/451/789 与 131/414/660/909，与报告一致）；全量验收 `passed=true`。
+- **新增 `browser/tests/check_chart_sync.py`**（进全量验收，14 项）：直测**构建产物** ——
+  报告条数与谱面份数自洽、新曲目 `prepare_ap_chart()` 全难度可算且除数一致、老曲目仍可算。
+  **它不依赖 `baseline`**：原生 oracle 用的是**纯上游 zip**（不含覆盖层），覆盖层里的新数据它看不到，
+  所以此前「全绿」盖不住这条链（这是本轮发现的一个验收盲区）。
+- 顺带记两条口径（省下一轮）：`prepare_ap_chart()` 默认读的是 **`manual_chart_conversion.json`** 而不是公共报告，
+  运行期由 `planner_core` 显式传入公共报告；它默认 `ordinary=False`，普通曲目必须传 `ordinary=True`。
+
 ## 下载产物替换 — 2026-10-05（网页代码未改，版本号仍是 0.3.2）
 
 **手机端取包工具 APK 换成修好的构建**（站点代码一个字节没动，所以不占版本号、真机凭据不失效）。
