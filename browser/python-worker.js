@@ -2,7 +2,15 @@ import {version as browserVersion} from './package.json';
 
 let pyodide, cancel, started = 0, lastPersist = 0, lastProgress = {};
 const decoder = new TextDecoder();
-let ready;
+let ready,localBaseURL,nativeWorker,nativeSeq=0;
+const nativeCache=new Map();
+self.browser_native_cached=key=>nativeCache.has(key)?JSON.stringify(nativeCache.get(key)):null;
+async function nativeSolve(raw){
+ if(!nativeWorker)nativeWorker=new Worker(new URL('./deck-native-worker.js',import.meta.url),{type:'module'});
+ const w=nativeWorker,id=++nativeSeq;
+ return new Promise((resolve,reject)=>{const finish=(v,e)=>{w.removeEventListener('message',message);w.removeEventListener('error',error);abortNative=null;e?reject(e):resolve(v);};const message=ev=>{if(ev.data.id===id)finish(ev.data.value,ev.data.error?Error(ev.data.error):null);};const error=e=>finish(null,Error(e.message));abortNative=()=>finish(null,Error('已取消'));w.addEventListener('message',message);w.addEventListener('error',error);w.postMessage({id,raw,baseURL:localBaseURL});});
+}
+let abortNative;
 
 self.browser_cancelled = () => cancel ? Atomics.load(cancel, 0) !== 0 : cancelRequested;
 self.browser_progress = raw => {
@@ -59,6 +67,7 @@ function solveAsync(raw) {
 /** 收到取消：置标志、掐掉正在跑的求解进程、让 await 着的求解立刻返回「已取消」。 */
 function cancelNow() {
     cancelRequested = true;
+    nativeWorker?.terminate();nativeWorker=null;abortNative?.();
     solverWorker?.terminate();
     solverWorker = null;
     const abort = abortSolve;
@@ -123,6 +132,7 @@ async function runtimeCacheKey(baseURL) {
 }
 
 async function initialize({baseURL, stored}) {
+  localBaseURL=baseURL;
   self.postMessage({type: 'loading', text: '正在下载并准备计算组件，首次打开请稍候…'});
   const indexURL = baseURL + 'vendor/pyodide/';
   const {loadPyodide} = await import(/* @vite-ignore */ indexURL + 'pyodide.mjs');
@@ -161,8 +171,10 @@ self.onmessage = async event => {
       self.postMessage({type: 'reply', id: message.id, value: {cacheReset}});
       return;
     }
-    if (message.cancel) cancel = new Int32Array(message.cancel);
-    if (message.method === 'optimize') {started = performance.now(); lastProgress = {};}
+    cancel = message.cancel ? new Int32Array(message.cancel) : null;
+    if(message.method==='deck-batch'&&pyodide.runPython("'deck_local' in sys.modules"))pyodide.runPython('import deck_local; deck_local.partial=None');
+    if (['optimize','deck-batch'].includes(message.method)) {started = performance.now(); lastProgress = {};}
+    if(message.method==='deck-batch'&&!pyodide.FS.analyzePath('/planner/deck-data.json').exists){const info=await (await fetch(new URL('build-info.json',localBaseURL),{cache:'no-cache'})).json();const r=await fetch(new URL('deck-local/'+info.local_deck_engine+'/deck-data.json',localBaseURL));if(!r.ok)throw Error('本地组卡资料加载失败');pyodide.FS.writeFile('/planner/deck-data.json',new Uint8Array(await r.arrayBuffer()));}
     pyodide.globals.set('_browser_method', message.method);
     pyodide.globals.set('_browser_body', JSON.stringify(message.body || {}));
     pyodide.globals.set('_browser_job_id', message.jobId || null);
@@ -173,9 +185,13 @@ self.onmessage = async event => {
             raw = pyodide.runPython('browser_runtime.invoke(_browser_method, _browser_body, _browser_job_id)');
             break;
         } catch (error) {
+            if(message.method==='deck-batch'){
+             const text=String(pyodide.runPython("import deck_local,json; json.dumps(deck_local.pending_native,ensure_ascii=False)"));const n=JSON.parse(text);
+             if(n.key){pyodide.runPython('deck_local.pending_native.clear()');if(cancelRequested)throw Error('已取消');const value=await nativeSolve(n.raw);if(!cancelRequested)nativeCache.set(n.key,value);continue;}
+            }
             const pending = takePendingSolve();
             if (!pending) throw error;          // 不是 NeedSolve，原样抛出
-            if (round >= 80) throw new Error('求解驱动未收敛（超过 80 轮）：' + error.message);
+            if (round >= 20000) throw new Error('求解驱动未收敛（超过 80 轮）：' + error.message);
             self.postMessage({type: 'progress', changes: {stage: '精确求解中…', solver_round: round + 1}});
             const value = await solveAsync(pending.raw);
             if (value && value.error) throw new Error(value.error);
@@ -186,6 +202,8 @@ self.onmessage = async event => {
     }
     self.postMessage({type: 'reply', id: message.id, value: JSON.parse(raw)});
   } catch (error) {
-    self.postMessage({type: 'reply', id: message.id, error: error.message});
+    if(message.method==='deck-batch'&&self.browser_cancelled()){let result=null;try{result=JSON.parse(String(pyodide.runPython('import deck_local,json; json.dumps(deck_local.partial,ensure_ascii=False)')));}catch{}self.postMessage({type:'reply',id:message.id,value:{status:'cancelled',result}});}else self.postMessage({type: 'reply', id: message.id, error: error.message});
   }
 };
+
+

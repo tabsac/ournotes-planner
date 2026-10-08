@@ -13,7 +13,7 @@
 import * as cloud from "./cloud-api.js";
 import {bindCommand, describeError} from "./cloud-api.js";
 import {
-    attachProfileCloud, listCloudProfiles, onProfileSyncChange, profileSyncState, pull, push,
+    attachProfileCloud, listCloudProfiles, onProfileSyncChange, profileSyncState, pull, push, keepLocalAsNew,
 } from "./profile-cloud.js";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>
@@ -70,7 +70,7 @@ function summaryOf(record) {
 
 export function mountCloudPanel(root, options = {}) {
     if (!root) return;
-    const {getCardRecord, onCardLoaded} = options;
+    const {getCardRecord, onCardLoaded, onActivityLoaded} = options;
     const state = {
         view: "login",          // login | register | account
         configured: cloud.isConfigured(),
@@ -122,8 +122,8 @@ export function mountCloudPanel(root, options = {}) {
         const info = cloud.apiBaseInfo();
 
         $("cloudServerLine").textContent = !state.configured
-            ? "未启用（这个站点没有后端）"
-            : (info?.source === "build" ? `同源 ${info.base || location.origin}` : `自定义 ${info.base || location.origin}`);
+            ? "此站点未启用云端服务"
+            : (`云端服务：${info.base || location.origin}`);
 
         if (!state.configured) {
             $("cloudAuthBox").hidden = false;
@@ -131,14 +131,14 @@ export function mountCloudPanel(root, options = {}) {
             $("cloudResultsBox").hidden = true;
             $("cloudProfileBox").hidden = true;
             $("cloudAuthBox").innerHTML = `
-              <p>这个站点没有连接后端，云端账号与同步不可用。<b>计算、卡库、导出都照常用。</b></p>
+              <p>此站点暂不提供账号登录和云端同步。<b>计算、卡库、导出都照常用。</b></p>
               <p class="cloud-dim">官方站点：<a href="${cloud.OFFICIAL_SITE}" target="_blank" rel="noopener">${esc(cloud.OFFICIAL_SITE)}</a></p>`;
         } else if (state.checking) {
             $("cloudAuthBox").hidden = false;
             $("cloudAccountBox").hidden = true;
             $("cloudResultsBox").hidden = true;
             $("cloudProfileBox").hidden = true;
-            $("cloudAuthBox").innerHTML = '<p class="cloud-dim">正在校验登录态…</p>';
+            $("cloudAuthBox").innerHTML = '<p class="cloud-dim">正在确认登录状态…</p>';
         } else if (!state.account) {
             // 表单**只在需要时重建**：一次失败的提交也会走 render()，
             // 如果每次都重建，用户刚填的用户名/密码就被清空了（踩过）。
@@ -258,15 +258,14 @@ export function mountCloudPanel(root, options = {}) {
                   <span class="cloud-dim">${esc(when(item.createdAt))}
                     ${item.size ? `· ${Math.max(1, Math.round(item.size / 1024))} KB` : ""}
                     ${state.cardLinked && state.cardLinked.id === item.id ? "· 本机关联" : ""}</span>
-                  ${item.summary ? `<span class="cloud-item-sum">${esc(item.summary)}</span>` : ""}
+                  ${item.kind === "activity" ? `<span class="cloud-item-sum">活动组卡 · 可发送 /on活动组卡 查看</span>` : item.summary ? `<span class="cloud-item-sum">${esc(item.summary)}</span>` : ""}
                 </div>
                 <div class="cloud-item-actions">
                   <button type="button" data-cloud-load="${esc(item.id)}">取回</button>
                   <button type="button" data-cloud-delete="${esc(item.id)}">删除</button>
                 </div>
               </li>`).join("")}</ul>` : '<p class="cloud-dim">云端还没有内容。</p>')}
-          <p class="cloud-note">只上传<b>展示用结果</b>（成绩卡 / 卡库）——上传前会自动剔除鉴权类字段，
-            服务器只存不算。</p>`;
+          <p class="cloud-note">云端保存活动方案、成绩卡和卡库，方便跨设备使用；原始账号包和游戏登录凭据不会上传。</p>`;
         $("cloudUploadCard").addEventListener("click", uploadCard);
         $("cloudRefresh").addEventListener("click", () => run(async () => {
             await refreshList();
@@ -288,7 +287,7 @@ export function mountCloudPanel(root, options = {}) {
         // 冲突时给两条出路：用云端覆盖本机 / 保留本机另存为新的一份（服务端 PUT 带旧 version 就是 409）
         const conflictRow = sync.mode !== "conflict" ? "" : `
           <div class="cloud-conflict">
-            <b>云端那份卡库被别的设备改过</b>（服务端返回 409，没有自动合并）。
+            <b>需要选择卡库恢复方式</b>：${esc(sync.detail || "两端都有改动，没有自动合并")}。
             <div class="cloud-account-actions">
               <button type="button" id="cloudConflictPull" class="primary">用云端覆盖本机</button>
               <button type="button" id="cloudConflictKeep">保留本机（另存为新的一份）</button>
@@ -298,12 +297,12 @@ export function mountCloudPanel(root, options = {}) {
           </div>`;
         // ⚠️ 列表要**声明式**地画在这里：run() 结束时会再 render() 一次，
         //    如果列表是在事件处理里命令式写进 DOM，就会被这次重画抹掉（踩过）。
-        const profiles = state.profiles;
+        const profiles = state.profiles || sync.profiles;
         $("cloudProfileBox").innerHTML = `
           <div class="cloud-head">
             <h4>个人卡库同步</h4>
             <div class="cloud-account-actions">
-              <button type="button" id="cloudProfilePush" class="primary">立即上传卡库</button>
+              <button type="button" id="cloudProfilePush" class="primary" ${sync.mode === "conflict" ? "disabled" : ""}>立即上传卡库</button>
               <button type="button" id="cloudProfileList">云端卡库列表</button>
             </div>
           </div>
@@ -325,22 +324,22 @@ export function mountCloudPanel(root, options = {}) {
           <p class="cloud-note">卡库会随每次编辑自动上传（改动合并后延迟几秒），失败不影响本地使用。</p>`;
         $("cloudProfilePush").addEventListener("click", () => run(async () => {
             const result = await push();
-            setMessage(result?.notice || result?.localNotice || "卡库已上传");
+            setMessage(result ? (result.notice || result.localNotice || "卡库已上传") : "尚未上传，请查看同步状态");
         }));
         const pullButton = $("cloudConflictPull");
         if (pullButton) {
             pullButton.addEventListener("click", () => run(async () => {
-                if (!linked?.id) throw new cloud.CloudError("no_link", "本机没有关联云端卡库，先刷新列表再恢复");
+                const restoreId = linked?.id || sync.restoreId;
+                if (!restoreId) { setMessage("请从下方云端卡库列表选择一份恢复"); return; }
                 if (!window.confirm("用云端那份覆盖本机卡库？本机当前养成会被替换。")) return;
-                const document_ = await pull(linked.id);
+                const document_ = await pull(restoreId);
                 setMessage(`已用云端那份覆盖本机（${document_?.name || ""}）`);
             }));
         }
         const keepButton = $("cloudConflictKeep");
         if (keepButton) {
             keepButton.addEventListener("click", () => run(async () => {
-                cloud.setLinkedResult(null, "profile");       // 断开旧关联 → 下一次是 POST 新建
-                const result = await push();
+                const result = await keepLocalAsNew();
                 setMessage("已把本机卡库另存为云端新的一份"
                     + (result?.localNotice ? "；" + result.localNotice : ""));
             }));
@@ -458,6 +457,7 @@ export function mountCloudPanel(root, options = {}) {
         return run(async () => {
             const item = await cloud.getResult(id);
             const payload = item?.payload;
+            if(payload?.kind === 'activity') {if(!onActivityLoaded) throw Error('活动方案暂时无法恢复。');await onActivityLoaded(payload);setMessage('活动方案已恢复，可在收益页下载图片。');return;}
             if (!payload || !Array.isArray(payload.entries) || !payload.entries.length) {
                 throw new cloud.CloudError("empty", "这条结果不是成绩卡（没有卡片数据）");
             }
@@ -630,29 +630,35 @@ export function mountCloudPanel(root, options = {}) {
     root.querySelector("#cloudBindClose").addEventListener("click", closeBind);
 
     // 登录态变化（含被 401 踢掉、改密后）都要重画
-    cloud.onAuthChange(() => render());
+    cloud.onAuthChange(account => { render(); import("./profile-cloud.js").then(m => m.onAuthChanged(account)).catch(() => {}); });
     // 卡库同步状态变化也重画（只改状态行，代价很小）
     onProfileSyncChange(sync => {
         state.profileSync = sync;
         updateBadge();
         const box = $("cloudProfileBox");
-        if (box && !box.hidden) {
-            const line = box.querySelector("p.cloud-dim");
-            if (line) {
-                const modeText = {
-                    off: "未启用", idle: "未同步", dirty: "有改动待上传", syncing: "正在同步…",
-                    synced: "已同步", conflict: "冲突（别的设备改过）", error: "同步失败",
-                }[sync.mode] || sync.mode;
-                line.innerHTML = `状态：<b>${esc(modeText)}</b>${sync.at ? ` · 上次成功 ${esc(whenMs(sync.at))}` : ""}`
-                    + `${sync.error ? ` · ${esc(sync.error)}` : ""}${sync.detail ? ` · ${esc(sync.detail)}` : ""}`;
+        if (box && !box.hidden) renderProfile();
+        const badge = document.getElementById("cloudBadge");
+        if (badge?.parentElement) {
+            let hint = document.getElementById("profileSyncHint");
+            if (!hint) {
+                hint = document.createElement("button");
+                hint.id = "profileSyncHint";
+                hint.type = "button";
+                hint.className = "cloud-dim";
+                hint.addEventListener("click", () => badge.click());
+                badge.parentElement.appendChild(hint);
             }
+            const labels = {syncing: "正在恢复或同步云端卡库", synced: "卡库已同步", dirty: "卡库有改动待同步",
+                conflict: "云端卡库需要选择：点击处理", error: "卡库同步失败：点击查看"};
+            hint.textContent = (labels[sync.mode] || "") + (sync.profiles?.length ? ` · 云端有 ${sync.profiles.length} 份` : "");
+            hint.hidden = !hint.textContent;
         }
     });
 
     // 有 token 就校验一次登录态（失效会被 401 清掉 → 回到登录表）
     if (state.configured && cloud.token()) {
         cloud.refreshSession()
-            .then(account => { if (account) setMessage(`已登录 ${account.username}`); })
+            .then(async account => { if (account) { setMessage(`已登录 ${account.username}`); await import("./profile-cloud.js").then(m => m.onAuthChanged(account)); } })
             .catch(() => { /* 401 已经清了 token，界面上会显示登录表 */ })
             .finally(() => { state.checking = false; render(); });
     } else {

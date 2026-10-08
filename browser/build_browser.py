@@ -203,6 +203,9 @@ def format_level(value):
 
 
 def main():
+    # Fetch validated server art before building; failure stops a stale release.
+    from sync_web_images import sync
+    sync(HERE)
     upstream = json.loads((HERE / "upstream.json").read_text("utf-8"))
     core_version = upstream["version"]
     source = HERE / "upstream" / upstream["archive"]
@@ -255,7 +258,7 @@ def main():
                 target = PUBLIC / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(archive.read(info))
-        for name in ("browser_runtime.py", "cp_model.py", "account_import.py", "account_scores.py"):
+        for name in ("browser_runtime.py", "cp_model.py", "account_import.py", "account_scores.py", "team_options.py", "activity_goals.py", "deck_local.py"):
             add_runtime(runtime, name, (HERE / name).read_bytes())
             included.append(name)
         # 覆盖层里**新增**的文件（上游 zip 里本来没有的）。
@@ -278,7 +281,7 @@ def main():
             added.append(relative)
     (PUBLIC / "planner-runtime.zip").write_bytes(payload.getvalue())
     # 角色立绘 / 道具图标（本地生成，随网页提供，无外链）
-    for image_dir, src_dir in (("character-images", "character"), ("item-images", "facility"),
+    for image_dir, src_dir in (("card-images", "card"), ("character-images", "character"), ("item-images", "facility"),
                                ("jacket-images", "jacket"), ("ui-images", "ui"), ("avatar-images", "avatar")):
         images = sorted((HERE / "static-images" / src_dir).glob("*.webp"))
         if not images:
@@ -396,6 +399,13 @@ def main():
         '<div id="dataStatusRoot" class="data-status-box"></div>\n'
         '<a href="./THIRD-PARTY-NOTICES.txt" target="_blank" rel="noopener">数据与第三方软件说明</a>')
 
+    shutil.copyfile(HERE / "image-version.js", PUBLIC / "image-version.js")
+    shutil.copyfile(HERE / "image-manifest.json", PUBLIC / "image-manifest.json")
+    html = replace_once(html, "</head>", '<script src="./image-version.js?v=1" defer></script></head>')
+    html = html.replace("01 / 资源预算", "01 / 组卡目标").replace("这次准备投入多少？", "这次想提高什么？").replace('<p class="muted">两种收益方案使用相同预算。养成费用、自然恢复和跳过券另计。</p>', '<p id="goalIntro" class="muted">勾选要计算的目标，无需填写总预算。</p>').replace("同样的预算，两种答案", "勾选目标，一次计算并保存").replace("分别展示活动 PT 和商店 PT 最优方案，", "可选冲榜、跳过、CP、活动 PT 或徽章，")
+    html = html.replace("手动 AP 参考采用最不利技能顺序的评级；它是模型条件，不代表实机保证。", "单局目标按技能顺序平均表现比较，高级预算模式采用最低参考评级。结果是模型估算。").replace("以及普通演出、挑战的前三首收益乐曲。", "并比较所选歌曲中合适的队伍。")
+    html = html.replace('<label>Boost 总预算', '<label hidden>Boost 总预算').replace('<label>已有 CP', '<label hidden>已有 CP')
+    html = html.replace("个人卡库 · 两套队伍 · 完整收益 · 前三首乐曲", "个人卡库 · 活动目标 · 单局推荐与预算规划").replace('data-tab="plan" class="active">收益规划', 'data-tab="plan" class="active">活动组卡')
     (HERE / "index.html").write_text(html, "utf-8", newline="\n")
     (HERE / "style.css").write_bytes(css + b"\n" + (HERE / "account.css").read_bytes())
     app = replace_once(app, 'const STORE = "ournotes-local-planner-v1-profile";', 'const STORE = "ournotes-browser-planner-v1-profile:" + window.Planner.scope;')
@@ -433,10 +443,10 @@ const profileStore = createProfileStorage(STORE, () => {
         'function save() {profileStore.save(JSON.stringify(state));}',
         '''function save() {profileStore.save(JSON.stringify(state));}
 window.PlannerProfile = {
-  document: () => clone(state),
+  document: () => state ? clone(state) : null,
   install: (document) => {
-    if (jobId || profileStore.outOfDate) return false;
-    try {replaceState(document);} catch {return false;}
+    if (!state || !catalog || jobId || profileStore.outOfDate) return false;
+    try {replaceState(document); window.dispatchEvent(new Event('ournotes-activity-inputs-installed'));} catch {return false;}
     return true;
   },
   storage: profileStore,
@@ -446,6 +456,7 @@ window.PlannerProfile = {
     app = replace_once(app, '$("inputArea").disabled = on;', '$("inputArea").disabled = on || profileStore.outOfDate;')
     app = replace_once(app, '$(id).disabled = on);', '$(id).disabled = on || profileStore.outOfDate);')
     app = replace_once(app, 'if (jobId || startingJob || updatingSoftware) return;', 'if (jobId || startingJob || updatingSoftware || profileStore.outOfDate) return;')
+    app = replace_once(app, 'boot();', 'window.PlannerProfile.ready = boot();')
     app = app.replace("fetch(", "window.plannerFetch(")
     app = replace_once(app, 'if (e.target.matches?.(".card-art img")) e.target.parentElement.classList.add("image-failed");', '''if (e.target.matches?.(".card-art img")) {
     const image = e.target;
@@ -596,8 +607,34 @@ window.PlannerAccount = {
   notify(text, type) { notice(text, type); },
 };
 '''
+    app = replace_once(app, 'notice("计算完成：按每阶段固定队伍与歌曲重复演出，完整比较当前候选范围内的两种收益与乐曲前三名。", "success");', 'notice(job.reused ? "已恢复相同输入的计算结果，无需重新计算。" : "计算完成：已比较两种收益与乐曲前三名。","success");')
+    app += "\nwindow.PlannerActivity = { current: () => state ? clone(state) : null, catalog: () => catalog, install: (artifact) => { if (jobId || startingJob || profileStore.outOfDate) return false; resultRequest = clone(artifact.actual_inputs); result = clone(artifact.result); renderResults(); return true; } };\n"
+    semantic = hashlib.sha256()
+    with zipfile.ZipFile(io.BytesIO(payload.getvalue())) as z:
+        for n in sorted(z.namelist()):
+            semantic.update(n.encode()); semantic.update(z.read(n))
+    (HERE / "activity-model.js").write_text('export const ACTIVITY_MODEL = ' + json.dumps(semantic.hexdigest()) + ';\n', 'utf-8')
+    app = replace_once(app, "function renderInputs() {", 'function renderTeamOptions() {\n  const grid = $("boostBudget").closest(".form-grid");\n  let panel = $("teamOptions");\n  if (!panel) {\n    panel = document.createElement("div"); panel.id = "teamOptions"; panel.className = "form-grid";\n    grid.after(panel);\n  }\n  const locked = state.settings.fixed_leader_id ?? null;\n  const candidates = state.candidate_member_ids.map(id => catalog.members.find(c => c.id === id)).filter(Boolean);\n  panel.innerHTML = `<label>队长限制（普通与挑战）<select id="fixedLeader"><option value="">自动选择队长</option>${locked && !candidates.some(c=>c.id===locked) ? `<option value="${locked}" selected>#${locked} · 已不在候选池</option>` : ""}${candidates.map(c=>`<option value="${c.id}" ${c.id===locked ? "selected" : ""}>#${c.id} ${esc(c.name)} · ${esc(c.title)}</option>`).join("")}</select></label><p class="tiny muted">固定队长会参与实际搜索。活动收益仍按最低参考评级计算；结果额外显示全部技能顺序的平均分与评级分布。</p>`;\n}\nfunction scoreStatistics(score) {\n  if (score.average_score === undefined || score.method !== "ap") return "";\n  const ranks = Object.entries(score.order_rank_counts || {}).filter(([,n])=>n).map(([rank,n])=>`${esc(rank)}：${n}/${score.skill_orders}`).join(" · ");\n  return `<br>技能顺序平均分 ${fmt(Math.round(score.average_score))} · 中位分 ${fmt(Math.round(score.median_score))}<br>参考评级分布 ${ranks}`;\n}\n\nfunction renderInputs() {\n  renderTeamOptions();')
+    app = replace_once(app, "function renderInventory() {", "function renderInventory() {\n  renderTeamOptions();")
+    app = replace_once(app, "  if (el.dataset.method) {", "  if (el.id === 'fixedLeader') { state.settings.fixed_leader_id = el.value ? Number(el.value) : null; changed(); }\n  if (el.dataset.method) {")
+    app = replace_once(app, "<br>单场：", "${scoreStatistics(s)}<br>单场：")
+    app = replace_once(app, "forEach(x=>x.checked=el.checked); changed(); }", "forEach(x=>x.checked=el.checked); changed(); renderTeamOptions(); }")
+    app = replace_once(app, "function renderTeamOptions() {", 'const activityGoalLabels = {challenge_score:\'挑战曲冲榜\',challenge_skip:\'挑战 Skip\',cp:\'刷挑战点数 CP\',event_pt:\'刷活动 PT\',shop_pt:\'刷活动徽章\',budget:\'预算内总收益（高级）\'};\nfunction goalMode() {const g=state.settings.goal;return g===\'budget\'?null:g===\'challenge_score\'||g===\'challenge_skip\'?\'challenge\':g===\'cp\'?\'normal\':state.settings.reward_stage||\'normal\';}\nfunction renderGoalOptions() {\n const s=state.settings;s.goal??=\'event_pt\';s.reward_stage??=\'normal\';\n const grid=$(\'boostBudget\').closest(\'.form-grid\');let panel=$(\'activityGoalOptions\');\n if(!panel){panel=document.createElement(\'div\');panel.id=\'activityGoalOptions\';panel.className=\'form-grid\';grid.before(panel);}\n panel.innerHTML=`<label>组卡目标<select id="activityGoal">${Object.entries(activityGoalLabels).map(([id,label])=>`<option value="${id}" ${s.goal===id?\'selected\':\'\'}>${label}</option>`).join(\'\')}</select></label>${[\'event_pt\',\'shop_pt\'].includes(s.goal)?`<label>演出类型<select id="rewardStage"><option value="normal" ${s.reward_stage===\'normal\'?\'selected\':\'\'}>普通演出</option><option value="challenge" ${s.reward_stage===\'challenge\'?\'selected\':\'\'}>挑战演出</option></select></label>`:\'\'}`;\n const mode=goalMode(),budget=s.goal===\'budget\';\n $(\'boostBudget\').closest(\'label\').hidden=!budget;$(\'startingCp\').closest(\'label\').hidden=!budget;\n $(\'boostEach\').closest(\'label\').hidden=!(budget||mode===\'normal\');\n $(\'challengeCp\').closest(\'label\').hidden=!(budget||mode===\'challenge\'&&!s.goal.startsWith(\'challenge_\'));\n grid.hidden=[...grid.children].every(e=>e.hidden);\n $(\'calculate\').innerHTML=(budget?\'计算预算内总收益\':\'推荐\'+esc(activityGoalLabels[s.goal])+\'队伍\')+\' <span>↗</span>\';\n $(\'goalIntro\').textContent=budget?\'根据总投入比较普通与挑战的完整循环收益。\':\'选择你想提高的单局表现，不需要填写总预算或已有 CP。\';\n const note=$(\'calculate\').nextElementSibling;\n if(note)note.textContent=budget?\'搜索预算内重复演出的最优方案。\':\'按所选目标比较候选队伍和歌曲。大卡池可能耗时较长，可取消后继续。\';\n if(s.goal===\'challenge_score\')s.challenge.method=\'ap\';if(s.goal===\'challenge_skip\')s.challenge.method=\'skip\';\n}\nfunction renderSingleGoalResult() {\n const g=result.goal;\n $(\'emptyResult\').hidden=true;$(\'results\').hidden=false;\n $(\'results\').innerHTML=`<div class="result-head"><h2>${esc(g.label)} <span class="warning-inline">模型估算</span></h2><span class="verified">候选池内完整搜索 ✓</span></div><p class="result-scope">${g.mode===\'normal\'?\'普通\':\'挑战\'}演出 · ${g.method===\'ap\'?\'AP 参考，120 种技能顺序等概率\':\'跳过参考\'} · ${g.mode===\'normal\'?g.consumed+\' Boost\':g.consumed+\' CP\'} / 局。无需总预算。</p>${result.recommendations.map((r,i)=>`<article class="panel strategy"><div class="objective">${i===0?\'推荐队伍\':\'推荐乐曲 \'+(i+1)} · ${esc(song(r.song_id).title)} · ${difficultyName[r.difficulty]}</div><div class="metric">${fmt(Math.round(r.target_value*100)/100)}<small> ${esc(g.unit)} / 局${g.method===\'ap\'?\'（平均）\':\'\'}</small></div><p class="tiny muted">综合力 ${fmt(r.power)} · ${g.method===\'ap\'?\'AP\':\'跳过\'}参考分 ${fmt(r.score.minimum_score)}～${fmt(r.score.maximum_score)}${scoreStatistics(r.score)}<br>平均单局：${fmt(Math.round(r.per_live.event_pt*100)/100)} 活动 PT · ${fmt(Math.round(r.per_live.shop_pt*100)/100)} 徽章${g.mode===\'normal\'?\' · \'+fmt(Math.round(r.per_live.cp*100)/100)+\' CP\':\'\'}<br>活动加成 +${percent(r.bonuses_10000.event_pt)} · 徽章加成 +${percent(r.bonuses_10000.shop_pt)}</p>${deckHtml(r)}</article>`).join(\'\')}<details class="assumptions"><summary>计算范围与假设 · 用时 ${result.search.elapsed_seconds} 秒 · 复用 ${result.search.cached_sheets} 张谱面</summary><ul>${result.assumptions.map(t=>`<li>${esc(t)}</li>`).join(\'\')}</ul></details><button id="exportResult" class="secondary full">导出本次结果与实际输入</button>`;\n}\n\nfunction renderTeamOptions() {\n  renderGoalOptions();')
+    app = replace_once(app, "固定队长会参与实际搜索。活动收益仍按最低参考评级计算；结果额外显示全部技能顺序的平均分与评级分布。", "固定队长会参与实际搜索。单局目标按技能顺序平均表现比较；高级预算模式按最低参考评级计算。")
+    app = replace_once(app, "function budgetHint() {", "function budgetHint() {\n  if (state.settings.goal !== 'budget') { $('budgetHint').textContent = '单局消耗已给出默认档位，可按自己的打法调整；总预算和已有 CP 不参与组卡。'; return; }")
+    app = replace_once(app, "  const p = result.plans;", "  if (result.goal) return renderSingleGoalResult();\n  const p = result.plans;")
+    app = replace_once(app, "  if (el.id === 'fixedLeader')", "  if (el.id === 'activityGoal' || el.id === 'rewardStage') { state.settings[el.id === 'activityGoal' ? 'goal' : 'reward_stage'] = el.value; renderGoalOptions(); renderSongs(); changed(); }\n  if (el.id === 'fixedLeader')")
+    app = replace_once(app, '$("songSelectors").innerHTML = ["normal","challenge"].map(mode => {', '$("songSelectors").innerHTML = (state.settings.goal === "budget" ? ["normal","challenge"] : [goalMode()]).map(mode => {')
+    app = replace_once(app, '<select data-method="${mode}">', '<select data-method="${mode}" ${state.settings.goal?.startsWith("challenge_")?"disabled":""}>')
+    app = app.replace("手动 AP 参考 · 最低顺序评级", "手动 AP 参考");
+    app = replace_once(app, '  x.playability ??= defaultPlayability();', '  x.settings.goal ??= "event_pt"; x.settings.reward_stage ??= "normal";\n  x.playability ??= defaultPlayability();')
+    app = replace_once(app, "计算完成：已比较两种收益与乐曲前三名。", "计算完成：已按当前目标比较队伍与乐曲。")
+    app = replace_once(app, '  return ["normal","challenge"].map(mode => {', '  return (state.settings.goal === "budget" ? ["normal","challenge"] : [goalMode()]).map(mode => {')
+    app = replace_once(app, "const s=state.settings;s.goal??='event_pt';s.reward_stage??='normal';", "const s=state.settings;s.goal??='event_pt';s.reward_stage??='normal';s.boost_per_live??=4;s.challenge_cp??=200;")
+    app = replace_once(app, "(budget?'计算预算内总收益':'推荐'+esc(activityGoalLabels[s.goal])+'队伍')", "(budget?'计算预算内总收益':'开始组卡')")
+    app = replace_once(app, '队长限制（普通与挑战）', '固定队长（可选）')
     (HERE / "generated-app.js").write_text(app, "utf-8")
-    report = {"browser_version": VERSION, "core_version": core_version,
+    report = {"activity_model": semantic.hexdigest(), "browser_version": VERSION, "core_version": core_version,
               "public_source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
               "runtime_sha256": hashlib.sha256(payload.getvalue()).hexdigest(),
               "python_runtime": "Pyodide 314.0.7", "solver": "or-tools-wasm 0.9.1",
@@ -606,6 +643,16 @@ window.PlannerAccount = {
               "snapshot_added": sorted(added),
               "static_files": {p.relative_to(PUBLIC).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
                                for p in sorted(PUBLIC.rglob("*")) if p.is_file() and p.name != "build-info.json"}}
+    native_source=HERE/'deck-native-assets'
+    native_root=PUBLIC/'deck-local'
+    if native_source.is_dir():
+        native_hash=hashlib.sha256(b''.join(p.read_bytes() for p in sorted(native_source.glob('*')) if p.is_file())).hexdigest()
+        shutil.copytree(native_source,native_root/native_hash,dirs_exist_ok=True)
+        report['local_deck_engine']=native_hash
+    native_root=PUBLIC / 'deck-local'
+    if (native_root/'ournotes_recommend_wasm_bg.wasm').is_file():
+        report['local_deck_engine']=hashlib.sha256(b''.join(p.read_bytes() for p in sorted(native_root.glob('*')) if p.is_file())).hexdigest()
+    report['static_files']={p.relative_to(PUBLIC).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(PUBLIC.rglob('*')) if p.is_file() and p.name!='build-info.json'}
     (PUBLIC / "build-info.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), "utf-8")
     print(json.dumps({k: v for k, v in report.items() if k not in ("payload_files", "static_files")}, ensure_ascii=False))
 

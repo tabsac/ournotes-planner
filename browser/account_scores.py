@@ -320,15 +320,17 @@ def build_scores(player, data):
     entries = entries_all[:25]
 
     if not entries:
-        if played:
-            empty["notes"].append(
-                "这个号有 %d 首游玩记录，但一张 FC / AP 都没有（都只是「完成」）—— "
-                "B25 只统计 FC / AP，「完成」不论难度都不计入，所以卡片是空的。"
-                "把歌打到 FC 或 AP 再重新取包。" % len(played))
+        if "_liveMusicResults" not in player:
+            message = "这份账号包未包含游玩成绩。旧版手机取包工具会遗漏成绩，请更新取包工具后重新取包；这不表示游戏账号或成绩被清空。"
+        elif not isinstance(player.get("_liveMusicResults"), list):
+            message = "这份账号包的游玩成绩格式无法识别，请更新取包工具后重新取包。"
+        elif missing_level:
+            message = "已读取游玩成绩，但部分歌曲的谱面资料缺失，暂时无法生成 B25。请更新网页数据后重试。"
+        elif played:
+            message = "已读取 %d 首游玩成绩，暂时没有可计入 B25 的 FC / AP 谱面。" % len(played)
         else:
-            empty["notes"].append(
-                "账号包里没有 _liveMusicResults（游玩记录）：这个号还没打过歌，或者刚重置过。"
-                "先在游戏里打几首歌再重新取包。")
+            message = "这份账号包没有可用的游玩成绩。请确认游戏登录账号，进入游戏后重新取包；仅凭这份数据无法判断账号是否被重置。"
+        empty["notes"].append(message)
         return empty
 
     levels = [e["value"] for e in entries]
@@ -395,40 +397,12 @@ def build_scores(player, data):
     # 不渲染 Markdown），所以别写 `**` 或反引号 —— 会连着符号一起显示出来。
     notes = []
     if missing_level:
-        listed = "、".join("乐曲 %d" % mid for mid in sorted(missing_level)[:5])
-        if len(missing_level) > 5:
-            listed += " 等"
-        notes.append(
-            "有 %d 首有游玩记录、但数据快照里查不到谱面等级，没法参与排序（%s）。"
-            % (len(missing_level), listed))
+        notes.append("有 %d 首乐曲缺少谱面等级，未参与 B25 排名。" % len(missing_level))
     if disagreements:
-        notes.append(
-            "有 %d 首歌「领过 FC 奖励」但 ClearedStatus 没到 FC 档 —— "
-            "可能档位判断不对，请把下面的原始值发我核对。" % disagreements)
-    notes.append(
-        "选曲来源：账号包里的游玩记录（_liveMusicResults，打过就有、只增不减）里"
-        "「计入值」最高的 %d 首；每首歌取它打过的难度里计入值最高的那个。"
-        "卡片只列这 %d 首，账号里一共 %d 首有记录。"
-        % (len(entries), len(entries), len(played)))
-    notes.append(
-        "只统计 FC / AP 的谱面：「完成」（打过但没 FC）无论什么难度都不计入，"
-        "所以只完成过的歌不会出现在卡片上（本号有 %d 首只完成过，没进卡片）。"
-        "计入值：AP 记谱面等级原值，FC 记原值 − 1。" % len(cleared_only))
-    notes.append(
-        "排名只看「计入值」（AP 记原值、FC 记原值 − 1），不看分数："
-        "第 1 名是计入值最高的那首；计入值相同时按原值（更难的那张谱面）高的在前，"
-        "再相同按乐曲 ID 排。")
-    notes.append(
-        "右上角的 HIGH SCORE RATING 是另一套来源：它是游戏自己那个榜"
-        "（_topHighScoreRatings，本次 %d 首）的评级之和，就等于每首分数 ÷ 1000 向下取整。"
-        "那个榜每个（曲型, 乐队）格子只留一首，新歌会把旧歌挤掉，"
-        "所以它的首数比「有记录」少是正常的 —— 卡片不靠它选曲。"
-        % len(board_ids))
-    notes.append(
-        "Rating = 这 %d 首谱面等级按「AP 记原值、FC 及其它减 1」之后的平均。"
-        "FC / AP 是根据账号包里的 ClearedStatus 整数推断的（账号包没有直接的 FC/AP 布尔值）。"
-        "打一首 FC 和一首 AP 后重新取包，看这张表里对应歌曲的「原始状态」变成多少，就能确认刻度。"
-        % len(entries))
+        notes.append("有 %d 首乐曲的 FC 奖励状态与成绩记录不一致，请重新导入最新账号包核对。" % disagreements)
+    notes.append("B25 从已取得 FC / AP 的成绩中选取计入值最高的 %d 首，每首乐曲只取一个难度。" % len(entries))
+    notes.append("HIGH SCORE RATING 为游戏评级，与 B25 的等级平均 Rating 分别显示。")
+    notes.append("FC / AP 状态由导入记录识别，仅供参考。")
 
     return {
         "available": True,

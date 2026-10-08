@@ -13,7 +13,7 @@
  *   * 上传前用 `cloud-api.js` 的 `preparePayload` 过滤敏感字段并提示。
  */
 import {
-    CloudError, getResult, isConfigured, linkedResult, listResults,
+    CloudError, currentAccount, getResult, isConfigured, linkedResult, listResults,
     preparePayload, saveLinkedResult, setLinkedResult, token,
 } from "./cloud-api.js";
 
@@ -21,11 +21,94 @@ const PUSH_DEBOUNCE_MS = 4000;
 export const PROFILE_KIND = "profile";
 
 /** 本地状态：'off'（未启用/未登录）/ 'idle' / 'dirty' / 'syncing' / 'synced' / 'conflict' / 'error' */
-const state = {mode: "idle", at: 0, error: "", detail: ""};
+const state = {mode: "idle", at: 0, error: "", detail: "", profiles: [], restoreId: null};
 const listeners = new Set();
 let timer = null;
 let hooks = null;
 let busy = false;
+let installing = false;
+let epoch = 0;
+let lastAuthIdentity = null;
+let poll = null;
+const identity = () => `${currentAccount()?.id ?? ""}:${token() ?? ""}`;
+// Fingerprint is the complete sanitized document, excluding removed secrets.
+// JSON.stringify preserves object enumeration order and array order; no key/card
+// sorting or numeric tolerance is applied. Numbers follow JSON (including -0 -> 0);
+// numeric strings remain distinct. savedAt is an envelope field, not part of doc.
+// This assumes schema-normalized documents emitted by the same import pipeline.
+// Different object key order can create a conservative false conflict; do not
+// change serialization without migrating existing linked.fingerprint baselines.
+const fingerprint = doc => JSON.stringify(preparePayload(doc).payload);
+const acknowledge = (item, doc) => setLinkedResult({id: item.id, version: item.version ?? 1,
+    fingerprint: fingerprint(doc)}, "profile");
+const schedule = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => { push().catch(() => {}); }, PUSH_DEBOUNCE_MS);
+};
+
+export async function reconcile() {
+    if (!canSync() || !hooks || busy || state.mode === "conflict") return;
+    const who = identity(), generation = epoch;
+    const linked = linkedResult("profile");
+    if (!linked?.id) {
+        busy = true;
+        try {
+            const profiles = await listCloudProfiles();
+            if (identity() !== who || epoch !== generation) return;
+            state.profiles = profiles;
+            state.restoreId = profiles.length === 1 ? profiles[0].id : null;
+            if (!profiles.length) { set("idle"); return; }
+            if (profiles.length === 1 && emptyLocal()) {
+                set("syncing", {detail: "正在自动恢复云端卡库"});
+                await pull(profiles[0].id, {onlyEmpty: true});
+            } else {
+                set("conflict", {detail: profiles.length > 1
+                    ? `云端有 ${profiles.length} 份卡库，请从列表选择恢复，或保留本机另存`
+                    : "本机已有内容，请选择恢复云端或保留本机另存"});
+            }
+        } catch (error) {
+            if (identity() === who && epoch === generation) set("error", {error: error.message});
+        } finally { busy = false; }
+        return;
+    }
+    busy = true;
+    try {
+        const item = await getResult(linked.id);
+        if (identity() !== who || epoch !== generation) return;
+        const remote = item?.payload?.document;
+        if (!remote?.profile?.inventory) throw new CloudError("empty", "云端卡库格式不正确");
+        const local = fingerprint(hooks.getDocument()), cloud = fingerprint(remote);
+        if (local === cloud) {
+            acknowledge(item, remote);
+            set("synced");
+        } else if (!linked.fingerprint && emptyLocal()) {
+            installing = true;
+            let installed;
+            try { installed = hooks.installDocument(remote); } finally { installing = false; }
+            if (!installed) { set("dirty", {detail: "正在计算，稍后自动恢复云端卡库"}); return; }
+            acknowledge(item, remote);
+            set("synced", {detail: "已自动恢复云端卡库"});
+        } else if (!linked.fingerprint) {
+            set("conflict", {detail: "尚无共同同步记录，请选择保留本机或恢复云端"});
+        } else if (cloud === linked.fingerprint) {
+            // Local changes made offline or while uploading survive reloads.
+            acknowledge(item, remote);
+            set("dirty", {detail: "本机改动待上传"});
+            schedule();
+        } else if (local === linked.fingerprint) {
+            installing = true;
+            const installed = hooks.installDocument(remote);
+            installing = false;
+            if (!installed) { set("dirty", {detail: "正在计算，稍后自动取回云端更新"}); return; }
+            acknowledge(item, remote);
+            set("synced", {detail: "已自动取回云端更新"});
+        } else {
+            set("conflict", {detail: "两端都有新改动，请选择保留或恢复"});
+        }
+    } catch (error) {
+        if (identity() === who && epoch === generation) set("error", {error: error.message});
+    } finally { installing = false; busy = false; }
+}
 
 function emit() {
     for (const listener of listeners) {
@@ -76,37 +159,35 @@ function canSync() {
  */
 export function attachProfileCloud(nextHooks) {
     hooks = nextHooks;
-    if (!canSync()) { set(isConfigured() ? "idle" : "off"); return; }
-    set(linkedResult("profile") ? "synced" : "idle");
+    set(canSync() ? "idle" : (isConfigured() ? "idle" : "off"));
+    if (!poll) {
+        poll = setInterval(() => { reconcile().catch(() => {}); }, 60000);
+        window.addEventListener("focus", () => { reconcile().catch(() => {}); });
+        window.addEventListener("online", () => { reconcile().catch(() => {}); });
+    }
 }
 
 /** 登录态变化时由界面调用：刚登录就尝试认领云端已有的卡库（不自动覆盖本地）。 */
 export async function onAuthChanged(account) {
-    if (!account) { set("idle"); return; }
-    try {
-        const linked = linkedResult("profile");
-        if (linked?.id) {
-            const item = await getResult(linked.id).catch(error => {
-                if (error instanceof CloudError && error.status === 404) {
-                    setLinkedResult(null, "profile");
-                    return null;
-                }
-                throw error;
-            });
-            if (item) { set("synced", {detail: "云端已有关联卡库"}); return; }
-        }
-        set("idle");
-    } catch (error) {
-        set("error", {error: error.message || String(error)});
-    }
+    if (lastAuthIdentity === identity()) { await reconcile(); return; }
+    lastAuthIdentity = identity();
+    const generation = ++epoch, who = identity();
+    clearTimeout(timer);
+    state.profiles = [];
+    state.restoreId = null;
+    set("idle");
+    if (!account) return;
+    await reconcile();
+
 }
 
 /** 本地卡库保存后调用（来自 profile-storage 的钩子）：延迟合并推送。 */
 export function noteLocalSave() {
+    if (installing) return;
+    if (state.mode === "conflict") return;
     if (!canSync()) { set(isConfigured() ? "idle" : "off"); return; }
     set("dirty", {detail: "有新改动待上传"});
-    clearTimeout(timer);
-    timer = setTimeout(() => { push().catch(() => {}); }, PUSH_DEBOUNCE_MS);
+    schedule();
 }
 
 /** 立刻推送（界面上的「立即同步」按钮也用它）。 */
@@ -115,13 +196,17 @@ export async function push() {
     // 本地守卫用**自己的**错误码，别复用 unauthorized（那会让界面把「没登录」说成「登录已过期」）
     if (!isConfigured()) throw new CloudError("not_configured", "这个站点没有启用云端功能");
     if (!token()) throw new CloudError("not_logged_in", "请先登录再同步卡库");
+    if (state.mode === "conflict") throw new CloudError("conflict", "请先选择恢复云端或保留本机另存");
     if (busy) return null;
     busy = true;
+    const who = identity(), generation = epoch;
+    let sent = null, completed = false;
     clearTimeout(timer);
     set("syncing");
     try {
         const document = hooks.getDocument();
         const prepared = preparePayload(document);
+        sent = fingerprint(prepared.payload);
         const body = {
             title: titleOf(prepared.payload),
             summary: summaryOf(prepared.payload),
@@ -129,17 +214,25 @@ export async function push() {
         };
         // 有关联就 PUT；关联没了（换过账号 / 别处删了 / 服务端 404）就清掉关联重新 POST
         const result = await saveLinkedResult({which: "profile", ...body});
+        if (identity() !== who || epoch !== generation) return null;
         if (result?.conflict) {
             set("conflict", {detail: "云端那条卡库被别的设备改过", error: result.error.message});
             return null;
         }
+        const linked = linkedResult("profile");
+        if (linked) setLinkedResult({...linked, fingerprint: sent}, "profile");
+        completed = true;
         set("synced", {detail: prepared.notice || ""});
         return result;
     } catch (error) {
-        set("error", {error: error.message || String(error)});
+        if (identity() === who && epoch === generation) set("error", {error: error.message || String(error)});
         throw error;
     } finally {
         busy = false;
+        if (completed && identity() === who && epoch === generation && fingerprint(hooks.getDocument()) !== sent) {
+            set("dirty", {detail: "上传期间的新改动待上传"});
+            schedule();
+        }
     }
 }
 
@@ -154,8 +247,10 @@ export async function listCloudProfiles() {
 }
 
 /** 取回云端某条卡库并装进应用。 */
-export async function pull(id) {
+export async function pull(id, {onlyEmpty = false} = {}) {
+    const who = identity(), generation = epoch;
     const item = await getResult(id);
+    if (identity() !== who || epoch !== generation) throw new CloudError("session_changed", "账号已切换");
     const payload = item?.payload;
     const document = payload?.document ?? (payload?.profile ? payload : null);
     if (!document || !document.profile?.inventory) {
@@ -164,9 +259,25 @@ export async function pull(id) {
     if (typeof hooks?.installDocument !== "function") {
         throw new CloudError("no_hooks", "卡库同步还没接上");
     }
-    const installed = hooks.installDocument(document);
+    if (onlyEmpty && !emptyLocal()) { set("conflict", {detail: "恢复前本机已有新改动，请选择恢复或另存"}); return null; }
+    installing = true;
+    let installed;
+    try { installed = hooks.installDocument(document); } finally { installing = false; }
     if (!installed) throw new CloudError("busy", "正在计算中，等这次算完再恢复卡库");
-    setLinkedResult({id: item.id, version: item.version ?? 1}, "profile");
+    acknowledge(item, document);
     set("synced", {detail: `已取回「${item.title || id}」`});
     return document;
+}
+
+function emptyLocal() {
+    const inventory = hooks?.getDocument()?.profile?.inventory;
+    return !inventory || (!(inventory.members?.length) && !(inventory.snaps?.length));
+}
+
+export async function keepLocalAsNew() {
+    if (busy) throw new CloudError("busy", "正在同步，请稍后再试");
+    setLinkedResult(null, "profile");
+    state.restoreId = null;
+    set("idle");
+    return push();
 }

@@ -300,7 +300,7 @@ export function expandCompact(compact) {
     const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
     const player = {
         _name: typeof compact.name === "string" ? compact.name : "",
-        _accountid: num(compact.aid),
+        _accountid: typeof compact.aid === "string" && /^\d+$/.test(compact.aid) ? compact.aid : num(compact.aid),
         _memberCards: (compact.m || []).map(r => ({
             _masterId: num(r[0]), _exp: num(r[1]), _awakeCount: num(r[2]) || 1,
             _rank: num(r[3]) || 1, _liveSkillLevel: num(r[4]) || 1,
@@ -317,7 +317,13 @@ export function expandCompact(compact) {
         _items: (compact.i || []).map(r => ({_masterItemId: num(r[0]), _amount: num(r[1])})),
         _bandItems: (compact.b || []).map(r => ({_masterId: num(r[0]), _level: num(r[1])})),
     };
-    return {player, source: "手机取包工具"};
+    if (Object.hasOwn(compact, "dg")) player._degrees = compact.dg;
+    if (Object.hasOwn(compact, "st")) player._stamps = compact.st;
+    if (Object.hasOwn(compact, "lr")) player._liveMusicResults = compact.lr;
+    if (Object.hasOwn(compact, "hr")) player._topHighScoreRatings = compact.hr;
+    const channelLabels = {"com.bilibili.sirius.official":"国际版（官网）", "com.bilibili.sirius":"国际版（Google Play）", "com.bushiroad.sirius":"日服"};
+    return {player, packageId: channelLabels[compact.pkg] ? compact.pkg : null,
+        source: "手机取包工具" + (channelLabels[compact.pkg] ? ` · ${channelLabels[compact.pkg]}` : "")};
 }
 
 /**
@@ -334,7 +340,7 @@ export async function decodePastedText(text) {
         const b64 = trimmed.slice(COMPACT_PREFIX.length).replace(/\s+/g, "");
         let compact;
         try {
-            compact = JSON.parse(await gunzip(base64ToBytes(b64)));
+            compact = parsePreservingInt64(await gunzip(base64ToBytes(b64)));
         } catch (error) {
             throw new Error("这段文本解不开，可能复制时被截断了。请重新复制完整的一段（以 ONPKG1: 开头）。");
         }

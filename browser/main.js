@@ -1,3 +1,4 @@
+import {createActivityStore} from './activity-results.js';
 const baseURL = new URL('./', location.href);
 const scope = baseURL.pathname;
 const loading = document.getElementById('browserLoading');
@@ -62,6 +63,7 @@ function openDatabase() {
 async function start() {
   await ensureIsolation();
   const database = await openDatabase();
+  const activityStore = createActivityStore(database, scope);
   const readCache = () => new Promise((resolve, reject) => {
     const request = database.transaction('state').objectStore('state').get('cache');
     request.onsuccess = () => resolve(request.result || null);
@@ -165,8 +167,11 @@ async function start() {
       }).catch(reject);
     });
   }
-  async function optimize(body) {
+  async function optimize(body,method='optimize') {
     if (job?.status === 'running') throw new Error('已有一次计算在运行，请等待或先取消。');
+    const activityOwner = activityStore.owner();
+    const cached = method==='optimize' ? await activityStore.lookup(body, activityOwner) : null;
+    if (cached) {job = {id:crypto.randomUUID(),status:'complete',reused:true,done:1,total:1,elapsed_seconds:0,result:cached.result,stage:'已恢复计算结果'};void activityStore.reuse(cached, activityOwner);return {job_id:job.id};}
     await lockCache();
     try {
       await persisted;
@@ -178,9 +183,10 @@ async function start() {
       sharedCancel = typeof SharedArrayBuffer === 'undefined' ? null : new SharedArrayBuffer(4);
       job = {id: crypto.randomUUID(), status: 'running', stage: '核对实际养成与数据', done: 0, total: 1};
       const id = job.id;
-      rpc('optimize', body, {jobId: id, cancel: sharedCancel}).then(async value => {
+      rpc(method, body, {jobId: id, cancel: sharedCancel}).then(async value => {
         await persisted;
-        Object.assign(job, value, {stage: value.status === 'complete' ? '计算完成' : '计算已取消'});
+        if(method==='optimize' && value.status === 'complete') void activityStore.complete(structuredClone(body), value.result, activityOwner).catch(storageError);
+        Object.assign(job, value, {stage: value.status === 'complete' ? '计算完成' : value.status==='cancelled' ? '计算已取消' : '计算失败'});
       }).catch(async error => {
         await persisted;
         const message = error.message.trim().split('\n').at(-1);
@@ -197,6 +203,7 @@ async function start() {
     if (path === '/api/check-growth') return rpc('check-growth', body);
     if (path === '/api/account-import') return rpc('import-account', body);
     if (path === '/api/optimize') return optimize(body);
+    if (path === '/api/local-deck-batch') return optimize(body,'deck-batch');
     if (path === `/api/jobs/${job?.id}/cancel`) {
       if (sharedCancel) Atomics.store(new Int32Array(sharedCancel), 0, 1);
       else worker.postMessage({type: 'cancel'});
@@ -218,6 +225,13 @@ async function start() {
   });
   await restoreCache();
   await import('./generated-app.js');
+  await window.PlannerProfile?.ready;
+  const {mountActivity} = await import('./activity-ui.js');
+  mountActivity(activityStore);
+  const {mountDeckBatch} = await import('./deck-batch-ui.js');
+  mountDeckBatch(database);
+  window.addEventListener('ournotes-activity-inputs-installed', () => void activityStore.restore());
+  void activityStore.restore();
   const {mountAccountImport} = await import('./account-ui.js');
   mountAccountImport(document.getElementById('accountImportRoot'));
   const {mountB25, loadScores, saveRecord} = await import('./b25-ui.js');
@@ -237,6 +251,7 @@ async function start() {
   }
   const {mountCloudPanel} = await import('./cloud-ui.js');
   mountCloudPanel(document.getElementById('cloudRoot'), {
+    onActivityLoaded: artifact => activityStore.accept(artifact),
     getCardRecord: () => loadScores(),
     onCardLoaded: (record, note) => { saveRecord(record); window.dispatchEvent(new CustomEvent('ournotes-cloud-card-loaded', {detail: note || ''})); },
   });

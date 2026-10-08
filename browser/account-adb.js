@@ -12,12 +12,12 @@
 import {Adb, AdbDaemonTransport, LinuxFileType} from "@yume-chan/adb";
 import {AdbDaemonWebUsbDeviceManager} from "@yume-chan/adb-daemon-webusb";
 import AdbWebCredentialStore from "@yume-chan/adb-credential-web";
-import {ANDROID_FILES_DIR} from "./account-ui.js";
+import {selectGameChannel} from "./account-channels.js";
 
 /** 这些目录是资源/缓存，里面有上 GB 的素材包，绝不能读。 */
 const SKIP_DIRS = new Set([
     "EncryptedBundles", "Addressables", "Master", "RemoteCatalog",
-    "il2cpp", "Unity", "UnityCache", "cache", "tmp",
+    "il2cpp", "Unity", "UnityCache", "cache", "tmp", "ChatHistory",
 ]);
 
 const MAX_FILE = 8 * 1024 * 1024;      // 单个文件上限
@@ -72,7 +72,7 @@ async function walk(sync, dir, out, budget, onStatus, depth = 0) {
         }
         const size = Number(entry.size ?? 0);
         if (!size || size > MAX_FILE || budget.total + size > MAX_TOTAL) continue;
-        onStatus(`读取 ${full.replace(ANDROID_FILES_DIR, "…")}（${Math.round(size / 1024)} KB）…`);
+        onStatus(`读取 ${full}（${Math.round(size / 1024)} KB）…`);
         try {
             const bytes = await readAll(sync.read(full));
             out.push({name: entry.name, bytes});
@@ -89,7 +89,7 @@ async function walk(sync, dir, out, budget, onStatus, depth = 0) {
  * @param {(text: string) => void} onStatus
  * @returns {Promise<Array<{name: string, bytes: Uint8Array}>>}
  */
-export async function readAccountFromDevice(onStatus) {
+export async function readAccountFromDevice(onStatus, requestedPackage = "") {
     const status = onStatus || (() => {});
     const manager = AdbDaemonWebUsbDeviceManager.BROWSER;
     if (!manager || !navigator.usb) {
@@ -126,18 +126,18 @@ export async function readAccountFromDevice(onStatus) {
     try {
         // 确认手机上装了这个游戏，顺便给出更清楚的报错
         status("正在检查手机上的游戏…");
-        const listing = await adb.subprocess.noneProtocol.spawnWaitText(
-            ["ls", "/sdcard/Android/data"]);
-        if (!listing.includes("com.bilibili.sirius.official")) {
-            throw new Error("这台手机上没找到 Our Notes 的安装数据（com.bilibili.sirius.official）。请确认游戏已在这台手机上安装并登录过。");
-        }
+        const listing = await adb.subprocess.noneProtocol.spawnWaitText(["pm", "list", "packages"]);
+        const channel = selectGameChannel(listing, requestedPackage);
+        const filesDir = `/sdcard/Android/data/${channel.packageId}/files`;
+        status(`正在读取${channel.label}账号文件…`);
 
         const sync = await adb.sync();
         try {
             const out = [];
             const budget = {files: 0, total: 0};
             status("正在读取账号文件…");
-            await walk(sync, ANDROID_FILES_DIR, out, budget, status);
+            await walk(sync, filesDir, out, budget, status);
+            if (!out.length) throw new Error(`已安装${channel.label}，但未读到账号文件。请先进入游戏；权限不足时使用电脑取包工具或 Shizuku。不要移动或重命名原目录。`);
             return out;
         } finally {
             try { await sync.dispose(); } catch { /* 忽略 */ }

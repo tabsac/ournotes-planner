@@ -8,7 +8,9 @@
  *
  * 解密与解析全部在浏览器里完成，账号数据不上传任何服务器。
  */
-import {findPlayerPackage, looksLikePackage, decodePastedText} from "./account-package.js";
+import {stickerCollection} from "./account-collection.js";
+import {GAME_CHANNELS} from "./account-channels.js";
+import {findPlayerPackage, looksLikePackage, decodePastedText, extractPlayer} from "./account-package.js";
 import {readZip, looksLikeZip} from "./account-zip.js";
 import {saveScores} from "./b25-ui.js";
 
@@ -95,6 +97,7 @@ export function buildImportPayload(profile, report, catalog) {
             character_count: report?.character_count ?? profile.character_ranks.length,
             character_total_rank: profile.character_total_rank,
             warnings: report?.warnings || [],
+            sticker_collection_known: profile.inventory.stickers?.known === true,
         },
     };
 }
@@ -110,12 +113,12 @@ function b25TeaserHtml(scores, saved) {
     const stats = scores.stats || {};
     return `<div class="b25-teaser">
   <div>
-    <b>B25 成绩已保存</b>
+    <b>${saved.pending ? "B25 成绩预览（导入后保存）" : "B25 成绩已保存"}</b>
     <span class="b25-teaser-line">共 ${stats.count} 首　FC ${stats.fc_count} / AP ${stats.ap_count}
       　Rating <b>${(Math.round(stats.rating_avg * 100) / 100).toFixed(2)}</b>
       <span class="b25-teaser-note">（谱面等级平均）</span></span>
   </div>
-  <a href="#b25" class="button-link primary" data-goto="b25">去 B25 成绩页看图 / 导出</a>
+  <a href="#b25" class="button-link primary" data-goto="b25">查看 B25 成绩 / 下载图片</a>
 </div>`;
 }
 
@@ -152,6 +155,7 @@ export function mountAccountImport(root) {    if (!root) return;
   <div class="account-actions">
     <button id="accountPickFiles" type="button">选择文件 / zip</button>
     <button id="accountPickDir" type="button">选择游戏文件夹</button>
+    <label>游戏版本 <select id="accountGameVersion"><option value="">自动识别（只安装一个版本时）</option>${GAME_CHANNELS.map(c=>`<option value="${c.packageId}">${c.label}</option>`).join("")}</select></label>
     <button id="accountAdb" type="button">浏览器直连手机（部分机型可用）</button>
   </div>
 
@@ -162,9 +166,9 @@ export function mountAccountImport(root) {    if (!root) return;
 
   <div class="account-paste">
     <label for="accountPaste"><b>或者：粘贴手机端 App（Shizuku）生成的那段文本</b>
-      <span class="muted">（只有走「手机端 App」那条路才会有这个 —— 那段文字不到 1 KB，用微信/QQ 发到电脑上复制粘贴即可，不用传文件）</span></label>
+      <span class="muted">（在手机端 App 中复制导入文本，再粘贴到这里；也可发送到电脑后导入）</span></label>
     <textarea id="accountPaste" rows="4" spellcheck="false"
-      placeholder="以 ONPKG1: 开头的一小段文字，粘贴到这里"></textarea>
+      placeholder="粘贴手机端 App 生成的 ONPKG1: 导入文本"></textarea>
     <button id="accountPasteGo" type="button" class="primary">导入粘贴的文本</button>
   </div>
 
@@ -223,18 +227,40 @@ export function mountAccountImport(root) {    if (!root) return;
             status("找到了疑似账号包，但里面没有玩家数据。可能选错了目录。", "error");
             return;
         }
+        const accounts = found.all.map(c => ({name: c.name, player: extractPlayer(c.json)})).filter(c => c.player);
+        if (accounts.length > 1) {
+            report.hidden = false;
+            status("找到多个账号，请选择要预览的账号；确认导入前不会修改卡库和成绩。");
+            report.innerHTML = `<div class="notice"><b>选择账号</b><p>不同游戏版本或历史文件可能包含不同账号。</p>${accounts.map((c, i) => `<button type="button" data-account-choice="${i}">${esc(c.player._name || "未命名")} · ${esc(c.player._accountid || "未知账号")} · 成员卡 ${c.player._memberCards?.length || 0} 张</button>`).join(" ")}</div>`;
+            report.querySelectorAll("[data-account-choice]").forEach(button => button.addEventListener("click", async () => {
+                const selected = accounts[Number(button.dataset.accountChoice)];
+                report.querySelectorAll("button").forEach(b => b.disabled = true);
+                await importPlayer(selected.player, selected.name);
+            }));
+            return;
+        }
         status("解密成功，正在按当前主数据换算等级…");
         await importPlayer(found.player, found.name);
     }
 
     /** 拿到 `_player` 之后的所有步骤：换算 -> 报告 -> 等用户确认合并。 */
     async function importPlayer(player, sourceLabel) {
+        if (!player || !Array.isArray(player._memberCards) || !player._memberCards.length) {
+            status("这份数据没有成员卡，可能读取了新号、空存档或错误文件。未修改当前卡库和成绩，请核对游戏昵称与 UID。", "error");
+            return;
+        }
         const response = await window.plannerFetch("/api/account-import", {
             method: "POST",
             body: JSON.stringify({player}),
         });
         const payload = await response.json();
         if (payload.error) { status("换算失败：" + payload.error, "error"); return; }
+        if (!payload.profile?.inventory?.members?.length) {
+            status("账号中的成员卡无法按当前游戏数据识别，可能是游戏版本或服务器数据不匹配。未修改当前卡库和成绩，请反馈所选版本。", "error");
+            return;
+        }
+        payload.profile.inventory.stickers = stickerCollection(player);
+        payload.report.sticker_collection = payload.profile.inventory.stickers;
         pending = payload;
         status("");
         showReport(payload, sourceLabel);
@@ -251,6 +277,7 @@ export function mountAccountImport(root) {    if (!root) return;
      ${info.account_id_text ? `　ID：<code>${esc(info.account_id_text)}</code>` : ""}</p>
   <table class="account-summary">
     <tbody>
+      <tr><th>贴纸收藏</th><td>${profile.inventory.stickers?.known ? `${profile.inventory.stickers.counts.filter(r => r.count > 0).length} 种（随卡库保存）` : "账号包未提供收藏信息"}</td></tr>
       <tr><th>成员卡</th><td>${profile.inventory.members.length} 张</td></tr>
       <tr><th>留影卡（Snap）</th><td>${profile.inventory.snaps.length} 张</td></tr>
       <tr><th>角色</th><td>${profile.character_ranks.length} 位，总角色等级 ${profile.character_total_rank}</td></tr>
@@ -268,11 +295,7 @@ export function mountAccountImport(root) {    if (!root) return;
   </div>
 </div>`;
         // 成绩不在这一页展开，存下来交给「B25 成绩」页渲染（那边刷新页面也不会丢）
-        const saved = saveScores(payload.scores, {
-            playerName: info.player_name,
-            accountId: info.account_id_text || info.account_id,
-            source: fileName,
-        });
+        const saved = {pending: true};
         report.querySelector("#accountB25").innerHTML = b25TeaserHtml(payload.scores, saved);
         bindB25Teaser(report.querySelector("#accountB25"));
         report.querySelector("#accountApply").addEventListener("click", () => {
@@ -280,6 +303,13 @@ export function mountAccountImport(root) {    if (!root) return;
                 const catalog = window.PlannerAccount.catalog();
                 const wrapper = buildImportPayload(profile, info, catalog);
                 window.PlannerAccount.apply(wrapper, "账号包已导入，请核对实际养成后计算。");
+                const saved = saveScores(payload.scores, {
+            playerName: info.player_name,
+            accountId: info.account_id_text || info.account_id,
+            source: fileName,
+        });
+                report.querySelector("#accountB25").innerHTML = b25TeaserHtml(payload.scores, saved);
+                bindB25Teaser(report.querySelector("#accountB25"));
             } catch (error) {
                 status("导入失败：" + (error?.message || error), "error");
             }
@@ -329,7 +359,7 @@ export function mountAccountImport(root) {    if (!root) return;
         button.disabled = true;
         try {
             const {readAccountFromDevice} = await loadAdbModule();
-            const entries = await readAccountFromDevice(t => status(t));
+            const entries = await readAccountFromDevice(t => status(t), $("accountGameVersion").value);
             if (!entries.length) { status("没有从手机里读到账号包文件。", "error"); return; }
             await unpack(entries);
         } catch (error) {
@@ -369,8 +399,10 @@ async function loadAdbModule() {
 
 function helpHtml() {
     return `
+<p><b>无需改名：</b>工具按实际安装版本读取。不要给文件或文件夹添加 .official，也不要重命名、移动、删除游戏数据目录。</p>
+<p>可识别国际版官网、Google Play 国际版与日服的安装包。国际版已验证取包解密；日服的真实账号解密与卡库换算仍待验证。</p>
 <p><b>账号包是什么</b>：游戏保存在手机里的账号数据文件，路径是</p>
-<pre>Android/data/${ANDROID_PACKAGE}/files/&lt;一串64位十六进制&gt;/</pre>
+<pre>${GAME_CHANNELS.map(c => `Android/data/${c.packageId}/files/`).join("\n")}</pre>
 <p>里面有三个文件，都是加密的，本页负责解密。目录名和文件名都是内容哈希、会随版本变，
    所以本页不靠文件名认，而是逐个尝试解密，取能解出玩家数据的那一份。</p>
 
@@ -380,8 +412,8 @@ function helpHtml() {
   <li>手机上打开开发者选项里的 <b>USB 调试</b>，并且把
       <b>「『仅充电』模式下允许 ADB 调试」</b>也打开（不少华为手机默认关着，不开的话电脑上根本不会出现 ADB 接口）</li>
   <li>用数据线连到电脑，手机弹出「允许 USB 调试吗？」时勾选<b>始终允许</b>再点允许</li>
-  <li>双击解压出来的 <code>取包.bat</code>，它会自动找到手机上的账号包，打包成 <code>账号包.zip</code> 并帮你打开所在文件夹</li>
-  <li>把 <code>账号包.zip</code> 拖回本页</li>
+  <li>双击解压出来的 <code>取包.bat</code>，它会自动找到手机上的账号包，打包成带时间标记的 <code>账号包-日期时间.zip</code> 并帮你打开所在文件夹</li>
+  <li>把本次生成的账号包 zip 拖回本页</li>
 </ol>
 <p>为什么推荐它：内置了 adb，不需要 root，也不需要装驱动或手机助手，更不受浏览器对 USB 设备的限制。
    详细排查见压缩包里的「使用说明.txt」。</p>

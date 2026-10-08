@@ -212,7 +212,7 @@ async function request(path, {method = "GET", body, auth = true, retryOn503 = tr
 
     // nginx 限流：503 + HTML。等一下再试一次，别动不动就报「服务器挂了」。
     if (response.status === 503) {
-        if (retryOn503) {
+        if (retryOn503 && method === "GET") {
             await sleep(RATE_LIMIT_RETRY_MS);
             return request(path, {method, body, auth, retryOn503: false});
         }
@@ -441,10 +441,15 @@ export function setLinkedResult(info, which = "b25") {
  * 返回 `{conflict: true, error}` 表示版本冲突（交给界面提示），其它错误照抛。
  */
 export async function saveLinkedResult({which = "b25", title, summary, payload, version} = {}) {
+    const owner = currentAccount()?.id, bearer = token();
+    const checkIdentity = () => {
+        if (owner !== currentAccount()?.id || bearer !== token()) throw new CloudError("session_changed", "账号已切换，请重新同步");
+    };
     const linked = linkedResult(which);
     if (linked?.id) {
         try {
             const updated = await updateResult(linked.id, {payload, version: version ?? linked.version});
+            checkIdentity();
             setLinkedResult({...linked, id: linked.id, version: updated?.version ?? (linked.version + 1)}, which);
             return updated;
         } catch (error) {
@@ -452,10 +457,12 @@ export async function saveLinkedResult({which = "b25", title, summary, payload, 
                 return {conflict: true, error};
             }
             if (!(error instanceof CloudError && error.status === 404)) throw error;
+            checkIdentity();
             setLinkedResult(null, which);       // 关联没了 → 下面重新建一条
         }
     }
     const created = await createResult({title, summary, payload});
+    checkIdentity();
     setLinkedResult({id: created.id, version: created.version ?? 1}, which);
     return created;
 }
@@ -486,3 +493,8 @@ export function describeError(error) {
     }
     return String(error?.message || error);
 }
+
+export function submitDeckJob(document,options){return request("/api/deck-jobs",{method:"POST",body:{document,options}});}
+export function getDeckJob(id){return request("/api/deck-jobs/"+encodeURIComponent(id));}
+export function listDeckJobs(){return request("/api/deck-jobs");}
+export function cancelDeckJob(id){return request("/api/deck-jobs/"+encodeURIComponent(id),{method:"DELETE"});}

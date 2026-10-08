@@ -37,7 +37,8 @@ for name in ("sample-ap", "all-expert-skip", "solver-ap", "solver-mixed-rounding
                     slots = p.sk.derive_ap_skill_contract(data.snapshot, request["profile"], row["member_ids"],
                         row["snap_ids"], _verified_inputs=data.skill_inputs)["slots"]
                 native = scorer.evaluate(power, slots)
-                if native != row["score"]:
+                # Extended UI statistics are validated by check_team_options.py.
+                if any(row["score"].get(k) != v for k, v in native.items()):
                     raise AssertionError(f"Browser score differs from native oracle: {name}/{objective}/{mode}")
                 seen[key] = True
                 checks += 1

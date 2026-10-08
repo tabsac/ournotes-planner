@@ -19,6 +19,9 @@ sys.modules["ortools.sat.python"].cp_model = browser_cp
 
 import planner_core as p
 import solver_search as ss
+import activity_goals
+import team_options
+team_options.install(p, ss)
 from search_cache import SearchCache, digest
 
 
@@ -27,7 +30,9 @@ class BrowserData(p.Data):
         # Different adapters/solver builds cannot reuse each other's proofs.
         native = super().fingerprint()
         bridge = [hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-                  hashlib.sha256(Path(browser_cp.__file__).read_bytes()).hexdigest()]
+                  hashlib.sha256(Path(browser_cp.__file__).read_bytes()).hexdigest(),
+                  hashlib.sha256(Path(team_options.__file__).read_bytes()).hexdigest(),
+                  hashlib.sha256(Path(activity_goals.__file__).read_bytes()).hexdigest()]
         return digest({"native": native, "browser": bridge, "solver": "or-tools-wasm-0.9.1"})
 
 
@@ -148,7 +153,7 @@ def invoke(method, raw, job_id=None):
     if method == "bootstrap":
         return json.dumps(bootstrap(), ensure_ascii=False)
     if method == "check-growth":
-        return json.dumps(p.growth_issues(body, data), ensure_ascii=False)
+        return json.dumps(p.growth_issues(activity_goals.prepare(body), data), ensure_ascii=False)
     if method == "import-account":
         # 账号包在浏览器里解密后，只把 _player 这一段送进来；主数据表在 Python 侧，
         # 所以 exp->等级 的换算复用与官方公式同一份表。
@@ -167,6 +172,9 @@ def invoke(method, raw, job_id=None):
                       "notes": ["成绩数据解析失败：%s" % exc]}
         return json.dumps({"profile": profile, "report": report, "scores": scores},
                           ensure_ascii=False)
+    if method == "deck-batch":
+        import deck_local
+        return json.dumps(deck_local.invoke(body,job_id),ensure_ascii=False,allow_nan=False)
     if method != "optimize":
         raise p.InputError("找不到此操作。")
     begin = time.monotonic()
@@ -176,8 +184,12 @@ def invoke(method, raw, job_id=None):
         browser_progress(json.dumps(changes, ensure_ascii=False))
 
     try:
-        result = p.optimize(body, progress=progress, cancelled=lambda: bool(browser_cancelled()),
+        body = team_options.configure(body, p, data)
+        if body.get("settings", {}).get("goal", "budget") == "budget":
+            result = p.optimize(body, progress=progress, cancelled=lambda: bool(browser_cancelled()),
                             data=data, cache=cache, run_id=job_id)
+        else:
+            result = activity_goals.optimize(body, p, data, progress=progress, cancelled=lambda: bool(browser_cancelled()), cache=cache, run_id=job_id)
         if browser_cancelled():
             raise p.Cancelled()
         cache.mark_status(job_id, "complete")

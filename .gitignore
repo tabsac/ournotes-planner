@@ -25,3 +25,7 @@ release/
 /browser/*.png
 /browser/tests/_*.cjs
 /browser/tests/*.png
+
+# Local synthetic test outputs
+browser/test-output/
+test-output/
