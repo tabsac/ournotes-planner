@@ -56,7 +56,7 @@ else:
 print("[2] 内置快照视图")
 raw_dir, index = sync.snapshot_raw_dir()
 bundled, bundled_event = sync.bundled_view(raw_dir)
-check("曲目数与快照标识", len(bundled) == 87, "%d 首 / %s" % (len(bundled), raw_dir.parent.name))
+check("曲目数与快照标识", len(bundled) == len(sync.load_table(raw_dir, "MasterLiveMusic")[1]), "%d 首 / %s" % (len(bundled), raw_dir.parent.name))
 check("每首都有 4 个难度且带显示等级", all(
     len(song["charts"]) == 4 and all(c.get("display") is not None for c in song["charts"].values())
     for song in bundled.values()))
@@ -175,7 +175,7 @@ check("别的歌也没被改",
       all(scores_after[key] == value for key, value in scores_before.items()
           if key not in target_score_ids))
 
-event_after = sync.load_table(sandbox, "MasterEvent")[1]
+event_after = [r for r in sync.load_table(sandbox, "MasterEvent")[1] if r["_id"]==bundled_event["id"]]
 check("活动窗口写成了新时间", event_after[0]["_startAt"] == "2030/01/01 00:00:00"
       and event_after[0]["_endAt"] == "2030/01/08 23:59:59", event_after[0])
 check("没碰过的表逐字节不变", all(

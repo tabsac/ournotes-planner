@@ -59,6 +59,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
+sys.path.insert(0,str(ROOT / "browser"))
 OVERRIDE = ROOT / "browser" / "snapshot-override"
 INDEX = OVERRIDE / "index.json"
 SYNC_RECORD = OVERRIDE / "data-sync.json"
@@ -160,7 +161,8 @@ def bundled_view(raw_dir):
     event = {}
     _, event_rows = load_table(raw_dir, "MasterEvent")
     if event_rows:
-        row = event_rows[0]
+        from snapshot_release import current_event
+        row = current_event(event_rows)
         event = {"id": row.get("_id"), "startAt": str(row.get("_startAt") or ""),
                  "endAt": str(row.get("_endAt") or "")}
     return songs, event
@@ -247,6 +249,8 @@ def write_table(raw_dir, name, wrapper, rows):
             if isinstance(payload.get(key), list):
                 payload[key] = rows
                 break
+    target=raw_dir / (name + '.json')
+    if target.exists() and json.loads(target.read_text('utf-8'))==payload:return
     text = json.dumps(payload, ensure_ascii=False, indent=1)
     (raw_dir / (name + ".json")).write_text(text, encoding="utf-8", newline="\n")
 
@@ -287,12 +291,13 @@ def apply_changes(raw_dir, remote_songs, report):
     if touched:
         write_table(raw_dir, "MasterLiveMusicScore", score_wrapper, score_rows)
 
-    event_rows = []
+    event_rows = []; changed_events=0
     if report["event"]:
         event_wrapper, event_rows = load_table(raw_dir, "MasterEvent")
         after = report["event"]["after"]
         for row in event_rows:
             if str(row.get("_id")) == str(after.get("id")) or len(event_rows) == 1:
+                changed_events += 1
                 row["_startAt"] = after.get("startAt")
                 row["_endAt"] = after.get("endAt")
         write_table(raw_dir, "MasterEvent", event_wrapper, event_rows)
@@ -307,7 +312,7 @@ def apply_changes(raw_dir, remote_songs, report):
         patched.append("MasterEvent")
     if patched:
         update_manifest(raw_dir, patched)
-    return touched, len(event_rows)
+    return touched, changed_events
 
 
 def update_manifest(raw_dir, table_names):

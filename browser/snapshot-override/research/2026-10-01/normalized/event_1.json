@@ -1,0 +1,772 @@
+{
+  "schema_version": 1,
+  "event_id": 1,
+  "name_text_id": "Event_Name_0001",
+  "shop_currency_item_id": 43,
+  "ordinary_base_rewards": [
+    {
+      "rank": "D",
+      "rank_code": 2,
+      "event_pt_base": 15,
+      "shop_pt_base_guaranteed": 18,
+      "shop_reward_rows": [
+        {
+          "_id": 7,
+          "_eventGroup": 2,
+          "_group": 1,
+          "_scoreRank": 2,
+          "_resourceCount": 18,
+          "_resourceType": 1,
+          "_resourceId": 43,
+          "_probability": 10000
+        }
+      ],
+      "cp_base": 3
+    },
+    {
+      "rank": "C",
+      "rank_code": 3,
+      "event_pt_base": 25,
+      "shop_pt_base_guaranteed": 30,
+      "shop_reward_rows": [
+        {
+          "_id": 8,
+          "_eventGroup": 2,
+          "_group": 1,
+          "_scoreRank": 3,
+          "_resourceCount": 30,
+          "_resourceType": 1,
+          "_resourceId": 43,
+          "_probability": 10000
+        }
+      ],
+      "cp_base": 4
+    },
+    {
+      "rank": "B",
+      "rank_code": 4,
+      "event_pt_base": 35,
+      "shop_pt_base_guaranteed": 42,
+      "shop_reward_rows": [
+        {
+          "_id": 9,
+          "_eventGroup": 2,
+          "_group": 1,
+          "_scoreRank": 4,
+          "_resourceCount": 42,
+          "_resourceType": 1,
+          "_resourceId": 43,
+          "_probability": 10000
+        }
+      ],
+      "cp_base": 5
+    },
+    {
+      "rank": "A",
+      "rank_code": 5,
+      "event_pt_base": 50,
+      "shop_pt_base_guaranteed": 60,
+      "shop_reward_rows": [
+        {
+          "_id": 10,
+          "_eventGroup": 2,
+          "_group": 1,
+          "_scoreRank": 5,
+          "_resourceCount": 60,
+          "_resourceType": 1,
+          "_resourceId": 43,
+          "_probability": 10000
+        }
+      ],
+      "cp_base": 6
+    },
+    {
+      "rank": "S",
+      "rank_code": 6,
+      "event_pt_base": 75,
+      "shop_pt_base_guaranteed": 90,
+      "shop_reward_rows": [
+        {
+          "_id": 11,
+          "_eventGroup": 2,
+          "_group": 1,
+          "_scoreRank": 6,
+          "_resourceCount": 90,
+          "_resourceType": 1,
+          "_resourceId": 43,
+          "_probability": 10000
+        }
+      ],
+      "cp_base": 8
+    },
+    {
+      "rank": "SS",
+      "rank_code": 7,
+      "event_pt_base": 100,
+      "shop_pt_base_guaranteed": 120,
+      "shop_reward_rows": [
+        {
+          "_id": 12,
+          "_eventGroup": 2,
+          "_group": 1,
+          "_scoreRank": 7,
+          "_resourceCount": 120,
+          "_resourceType": 1,
+          "_resourceId": 43,
+          "_probability": 10000
+        }
+      ],
+      "cp_base": 10
+    }
+  ],
+  "challenge_base_rewards": [
+    {
+      "rank": "D",
+      "rank_code": 2,
+      "event_pt_base": 1500,
+      "shop_pt_base_guaranteed": 2150,
+      "shop_reward_rows": [
+        {
+          "_id": 7,
+          "_eventGroup": 2,
+          "_group": 1,
+          "_scoreRank": 2,
+          "_resourceCount": 2150,
+          "_resourceType": 1,
+          "_resourceId": 43,
+          "_probability": 10000
+        }
+      ]
+    },
+    {
+      "rank": "C",
+      "rank_code": 3,
+      "event_pt_base": 2000,
+      "shop_pt_base_guaranteed": 2650,
+      "shop_reward_rows": [
+        {
+          "_id": 8,
+          "_eventGroup": 2,
+          "_group": 1,
+          "_scoreRank": 3,
+          "_resourceCount": 2650,
+          "_resourceType": 1,
+          "_resourceId": 43,
+          "_probability": 10000
+        }
+      ]
+    },
+    {
+      "rank": "B",
+      "rank_code": 4,
+      "event_pt_base": 2550,
+      "shop_pt_base_guaranteed": 3400,
+      "shop_reward_rows": [
+        {
+          "_id": 9,
+          "_eventGroup": 2,
+          "_group": 1,
+          "_scoreRank": 4,
+          "_resourceCount": 3400,
+          "_resourceType": 1,
+          "_resourceId": 43,
+          "_probability": 10000
+        }
+      ]
+    },
+    {
+      "rank": "A",
+      "rank_code": 5,
+      "event_pt_base": 3250,
+      "shop_pt_base_guaranteed": 4100,
+      "shop_reward_rows": [
+        {
+          "_id": 10,
+          "_eventGroup": 2,
+          "_group": 1,
+          "_scoreRank": 5,
+          "_resourceCount": 4100,
+          "_resourceType": 1,
+          "_resourceId": 43,
+          "_probability": 10000
+        }
+      ]
+    },
+    {
+      "rank": "S",
+      "rank_code": 6,
+      "event_pt_base": 3900,
+      "shop_pt_base_guaranteed": 5100,
+      "shop_reward_rows": [
+        {
+          "_id": 11,
+          "_eventGroup": 2,
+          "_group": 1,
+          "_scoreRank": 6,
+          "_resourceCount": 5100,
+          "_resourceType": 1,
+          "_resourceId": 43,
+          "_probability": 10000
+        }
+      ]
+    },
+    {
+      "rank": "SS",
+      "rank_code": 7,
+      "event_pt_base": 5000,
+      "shop_pt_base_guaranteed": 6400,
+      "shop_reward_rows": [
+        {
+          "_id": 12,
+          "_eventGroup": 2,
+          "_group": 1,
+          "_scoreRank": 7,
+          "_resourceCount": 6400,
+          "_resourceType": 1,
+          "_resourceId": 43,
+          "_probability": 10000
+        }
+      ]
+    }
+  ],
+  "ordinary_boost_rows_raw": [
+    {
+      "_id": 1,
+      "_consumedLiveBoostCount": 1,
+      "_playerExpRate": 5,
+      "_memberCardExpRate": 5,
+      "_friendshipExpRate": 5,
+      "_eventPointRate": 5,
+      "_liveMusicRewardRate": 5,
+      "_circlePointRate": 5,
+      "_characterRankExpRate": 0,
+      "_livePointRate": 0
+    },
+    {
+      "_id": 2,
+      "_consumedLiveBoostCount": 2,
+      "_playerExpRate": 10,
+      "_memberCardExpRate": 10,
+      "_friendshipExpRate": 10,
+      "_eventPointRate": 10,
+      "_liveMusicRewardRate": 10,
+      "_circlePointRate": 10,
+      "_characterRankExpRate": 0,
+      "_livePointRate": 0
+    },
+    {
+      "_id": 3,
+      "_consumedLiveBoostCount": 3,
+      "_playerExpRate": 15,
+      "_memberCardExpRate": 15,
+      "_friendshipExpRate": 15,
+      "_eventPointRate": 15,
+      "_liveMusicRewardRate": 15,
+      "_circlePointRate": 15,
+      "_characterRankExpRate": 0,
+      "_livePointRate": 0
+    },
+    {
+      "_id": 4,
+      "_consumedLiveBoostCount": 4,
+      "_playerExpRate": 20,
+      "_memberCardExpRate": 20,
+      "_friendshipExpRate": 20,
+      "_eventPointRate": 20,
+      "_liveMusicRewardRate": 20,
+      "_circlePointRate": 20,
+      "_characterRankExpRate": 0,
+      "_livePointRate": 0
+    },
+    {
+      "_id": 5,
+      "_consumedLiveBoostCount": 5,
+      "_playerExpRate": 25,
+      "_memberCardExpRate": 25,
+      "_friendshipExpRate": 25,
+      "_eventPointRate": 25,
+      "_liveMusicRewardRate": 25,
+      "_circlePointRate": 25,
+      "_characterRankExpRate": 0,
+      "_livePointRate": 0
+    },
+    {
+      "_id": 6,
+      "_consumedLiveBoostCount": 6,
+      "_playerExpRate": 30,
+      "_memberCardExpRate": 30,
+      "_friendshipExpRate": 30,
+      "_eventPointRate": 30,
+      "_liveMusicRewardRate": 30,
+      "_circlePointRate": 30,
+      "_characterRankExpRate": 0,
+      "_livePointRate": 0
+    },
+    {
+      "_id": 7,
+      "_consumedLiveBoostCount": 7,
+      "_playerExpRate": 35,
+      "_memberCardExpRate": 35,
+      "_friendshipExpRate": 35,
+      "_eventPointRate": 35,
+      "_liveMusicRewardRate": 35,
+      "_circlePointRate": 35,
+      "_characterRankExpRate": 0,
+      "_livePointRate": 0
+    },
+    {
+      "_id": 8,
+      "_consumedLiveBoostCount": 8,
+      "_playerExpRate": 40,
+      "_memberCardExpRate": 40,
+      "_friendshipExpRate": 40,
+      "_eventPointRate": 40,
+      "_liveMusicRewardRate": 40,
+      "_circlePointRate": 40,
+      "_characterRankExpRate": 0,
+      "_livePointRate": 0
+    },
+    {
+      "_id": 9,
+      "_consumedLiveBoostCount": 9,
+      "_playerExpRate": 45,
+      "_memberCardExpRate": 45,
+      "_friendshipExpRate": 45,
+      "_eventPointRate": 45,
+      "_liveMusicRewardRate": 45,
+      "_circlePointRate": 45,
+      "_characterRankExpRate": 0,
+      "_livePointRate": 0
+    },
+    {
+      "_id": 10,
+      "_consumedLiveBoostCount": 10,
+      "_playerExpRate": 50,
+      "_memberCardExpRate": 50,
+      "_friendshipExpRate": 50,
+      "_eventPointRate": 50,
+      "_liveMusicRewardRate": 50,
+      "_circlePointRate": 50,
+      "_characterRankExpRate": 0,
+      "_livePointRate": 0
+    }
+  ],
+  "challenge_cp_consumption_rows_raw": [
+    {
+      "_id": 1,
+      "_consumedChallengePointCount": 200,
+      "_playerExpRate": 1,
+      "_memberCardExpRate": 1,
+      "_friendshipExpRate": 1,
+      "_eventPointRate": 1,
+      "_liveMusicRewardRate": 1
+    },
+    {
+      "_id": 2,
+      "_consumedChallengePointCount": 400,
+      "_playerExpRate": 2,
+      "_memberCardExpRate": 2,
+      "_friendshipExpRate": 2,
+      "_eventPointRate": 2,
+      "_liveMusicRewardRate": 2
+    },
+    {
+      "_id": 3,
+      "_consumedChallengePointCount": 800,
+      "_playerExpRate": 4,
+      "_memberCardExpRate": 4,
+      "_friendshipExpRate": 4,
+      "_eventPointRate": 4,
+      "_liveMusicRewardRate": 4
+    },
+    {
+      "_id": 4,
+      "_consumedChallengePointCount": 1600,
+      "_playerExpRate": 8,
+      "_memberCardExpRate": 8,
+      "_friendshipExpRate": 8,
+      "_eventPointRate": 8,
+      "_liveMusicRewardRate": 8
+    }
+  ],
+  "challenge_music_rows_raw": [
+    {
+      "_id": 1,
+      "_eventId": 1,
+      "_liveMusicId": 100109,
+      "_musicType": 2,
+      "_gekisouMission1": 0,
+      "_gekisouMission2": 0,
+      "_gekisouMission3": 0,
+      "_rankingRewardGroup": 100101,
+      "_stratAt": "",
+      "_endAt": ""
+    },
+    {
+      "_id": 2,
+      "_eventId": 1,
+      "_liveMusicId": 100056,
+      "_musicType": 2,
+      "_gekisouMission1": 0,
+      "_gekisouMission2": 0,
+      "_gekisouMission3": 0,
+      "_rankingRewardGroup": 100102,
+      "_stratAt": "",
+      "_endAt": ""
+    },
+    {
+      "_id": 3,
+      "_eventId": 1,
+      "_liveMusicId": 100063,
+      "_musicType": 2,
+      "_gekisouMission1": 0,
+      "_gekisouMission2": 0,
+      "_gekisouMission3": 0,
+      "_rankingRewardGroup": 100103,
+      "_stratAt": "",
+      "_endAt": ""
+    }
+  ],
+  "bonus_effects_raw": [
+    {
+      "_id": 1,
+      "_eventId": 1,
+      "_resourceTypeConstraint": 2,
+      "_characterId": 0,
+      "_bandId": 0,
+      "_cardType": 0,
+      "_tagId": 0,
+      "_memberCardId": 61,
+      "_supportCardId": 0,
+      "_eventBonusType": 0,
+      "_rank1EffectValue": 3000,
+      "_rank2EffectValue": 3500,
+      "_rank3EffectValue": 4000,
+      "_rank4EffectValue": 4500,
+      "_rank5EffectValue": 5000
+    },
+    {
+      "_id": 2,
+      "_eventId": 1,
+      "_resourceTypeConstraint": 2,
+      "_characterId": 0,
+      "_bandId": 0,
+      "_cardType": 0,
+      "_tagId": 0,
+      "_memberCardId": 61,
+      "_supportCardId": 0,
+      "_eventBonusType": 2,
+      "_rank1EffectValue": 3000,
+      "_rank2EffectValue": 3500,
+      "_rank3EffectValue": 4000,
+      "_rank4EffectValue": 4500,
+      "_rank5EffectValue": 5000
+    },
+    {
+      "_id": 3,
+      "_eventId": 1,
+      "_resourceTypeConstraint": 2,
+      "_characterId": 0,
+      "_bandId": 0,
+      "_cardType": 0,
+      "_tagId": 0,
+      "_memberCardId": 62,
+      "_supportCardId": 0,
+      "_eventBonusType": 0,
+      "_rank1EffectValue": 3000,
+      "_rank2EffectValue": 3500,
+      "_rank3EffectValue": 4000,
+      "_rank4EffectValue": 4500,
+      "_rank5EffectValue": 5000
+    },
+    {
+      "_id": 4,
+      "_eventId": 1,
+      "_resourceTypeConstraint": 2,
+      "_characterId": 0,
+      "_bandId": 0,
+      "_cardType": 0,
+      "_tagId": 0,
+      "_memberCardId": 62,
+      "_supportCardId": 0,
+      "_eventBonusType": 2,
+      "_rank1EffectValue": 3000,
+      "_rank2EffectValue": 3500,
+      "_rank3EffectValue": 4000,
+      "_rank4EffectValue": 4500,
+      "_rank5EffectValue": 5000
+    },
+    {
+      "_id": 5,
+      "_eventId": 1,
+      "_resourceTypeConstraint": 2,
+      "_characterId": 0,
+      "_bandId": 0,
+      "_cardType": 0,
+      "_tagId": 0,
+      "_memberCardId": 63,
+      "_supportCardId": 0,
+      "_eventBonusType": 0,
+      "_rank1EffectValue": 1500,
+      "_rank2EffectValue": 1750,
+      "_rank3EffectValue": 2000,
+      "_rank4EffectValue": 2250,
+      "_rank5EffectValue": 2500
+    },
+    {
+      "_id": 6,
+      "_eventId": 1,
+      "_resourceTypeConstraint": 2,
+      "_characterId": 0,
+      "_bandId": 0,
+      "_cardType": 0,
+      "_tagId": 0,
+      "_memberCardId": 63,
+      "_supportCardId": 0,
+      "_eventBonusType": 2,
+      "_rank1EffectValue": 1500,
+      "_rank2EffectValue": 1750,
+      "_rank3EffectValue": 2000,
+      "_rank4EffectValue": 2250,
+      "_rank5EffectValue": 2500
+    },
+    {
+      "_id": 7,
+      "_eventId": 1,
+      "_resourceTypeConstraint": 2,
+      "_characterId": 0,
+      "_bandId": 3,
+      "_cardType": 0,
+      "_tagId": 0,
+      "_memberCardId": 0,
+      "_supportCardId": 0,
+      "_eventBonusType": 0,
+      "_rank1EffectValue": 2000,
+      "_rank2EffectValue": 2300,
+      "_rank3EffectValue": 2600,
+      "_rank4EffectValue": 2900,
+      "_rank5EffectValue": 3200
+    },
+    {
+      "_id": 8,
+      "_eventId": 1,
+      "_resourceTypeConstraint": 2,
+      "_characterId": 0,
+      "_bandId": 3,
+      "_cardType": 0,
+      "_tagId": 0,
+      "_memberCardId": 0,
+      "_supportCardId": 0,
+      "_eventBonusType": 2,
+      "_rank1EffectValue": 2000,
+      "_rank2EffectValue": 2300,
+      "_rank3EffectValue": 2600,
+      "_rank4EffectValue": 2900,
+      "_rank5EffectValue": 3200
+    },
+    {
+      "_id": 9,
+      "_eventId": 1,
+      "_resourceTypeConstraint": 2,
+      "_characterId": 0,
+      "_bandId": 0,
+      "_cardType": 2,
+      "_tagId": 0,
+      "_memberCardId": 0,
+      "_supportCardId": 0,
+      "_eventBonusType": 0,
+      "_rank1EffectValue": 1000,
+      "_rank2EffectValue": 1200,
+      "_rank3EffectValue": 1400,
+      "_rank4EffectValue": 1600,
+      "_rank5EffectValue": 1800
+    },
+    {
+      "_id": 10,
+      "_eventId": 1,
+      "_resourceTypeConstraint": 2,
+      "_characterId": 0,
+      "_bandId": 0,
+      "_cardType": 2,
+      "_tagId": 0,
+      "_memberCardId": 0,
+      "_supportCardId": 0,
+      "_eventBonusType": 2,
+      "_rank1EffectValue": 1000,
+      "_rank2EffectValue": 1200,
+      "_rank3EffectValue": 1400,
+      "_rank4EffectValue": 1600,
+      "_rank5EffectValue": 1800
+    },
+    {
+      "_id": 11,
+      "_eventId": 1,
+      "_resourceTypeConstraint": 3,
+      "_characterId": 0,
+      "_bandId": 0,
+      "_cardType": 0,
+      "_tagId": 0,
+      "_memberCardId": 0,
+      "_supportCardId": 62,
+      "_eventBonusType": 1,
+      "_rank1EffectValue": 3000,
+      "_rank2EffectValue": 3500,
+      "_rank3EffectValue": 4000,
+      "_rank4EffectValue": 4500,
+      "_rank5EffectValue": 5000
+    },
+    {
+      "_id": 12,
+      "_eventId": 1,
+      "_resourceTypeConstraint": 3,
+      "_characterId": 0,
+      "_bandId": 0,
+      "_cardType": 0,
+      "_tagId": 0,
+      "_memberCardId": 0,
+      "_supportCardId": 62,
+      "_eventBonusType": 2,
+      "_rank1EffectValue": 3000,
+      "_rank2EffectValue": 3500,
+      "_rank3EffectValue": 4000,
+      "_rank4EffectValue": 4500,
+      "_rank5EffectValue": 5000
+    },
+    {
+      "_id": 13,
+      "_eventId": 1,
+      "_resourceTypeConstraint": 3,
+      "_characterId": 0,
+      "_bandId": 0,
+      "_cardType": 0,
+      "_tagId": 0,
+      "_memberCardId": 0,
+      "_supportCardId": 63,
+      "_eventBonusType": 1,
+      "_rank1EffectValue": 3000,
+      "_rank2EffectValue": 3500,
+      "_rank3EffectValue": 4000,
+      "_rank4EffectValue": 4500,
+      "_rank5EffectValue": 5000
+    },
+    {
+      "_id": 14,
+      "_eventId": 1,
+      "_resourceTypeConstraint": 3,
+      "_characterId": 0,
+      "_bandId": 0,
+      "_cardType": 0,
+      "_tagId": 0,
+      "_memberCardId": 0,
+      "_supportCardId": 63,
+      "_eventBonusType": 2,
+      "_rank1EffectValue": 3000,
+      "_rank2EffectValue": 3500,
+      "_rank3EffectValue": 4000,
+      "_rank4EffectValue": 4500,
+      "_rank5EffectValue": 5000
+    },
+    {
+      "_id": 15,
+      "_eventId": 1,
+      "_resourceTypeConstraint": 3,
+      "_characterId": 0,
+      "_bandId": 0,
+      "_cardType": 0,
+      "_tagId": 0,
+      "_memberCardId": 0,
+      "_supportCardId": 64,
+      "_eventBonusType": 1,
+      "_rank1EffectValue": 1500,
+      "_rank2EffectValue": 1750,
+      "_rank3EffectValue": 2000,
+      "_rank4EffectValue": 2250,
+      "_rank5EffectValue": 2500
+    },
+    {
+      "_id": 16,
+      "_eventId": 1,
+      "_resourceTypeConstraint": 3,
+      "_characterId": 0,
+      "_bandId": 0,
+      "_cardType": 0,
+      "_tagId": 0,
+      "_memberCardId": 0,
+      "_supportCardId": 64,
+      "_eventBonusType": 2,
+      "_rank1EffectValue": 1500,
+      "_rank2EffectValue": 1750,
+      "_rank3EffectValue": 2000,
+      "_rank4EffectValue": 2250,
+      "_rank5EffectValue": 2500
+    },
+    {
+      "_id": 17,
+      "_eventId": 1,
+      "_resourceTypeConstraint": 3,
+      "_characterId": 0,
+      "_bandId": 3,
+      "_cardType": 0,
+      "_tagId": 0,
+      "_memberCardId": 0,
+      "_supportCardId": 0,
+      "_eventBonusType": 1,
+      "_rank1EffectValue": 2000,
+      "_rank2EffectValue": 2300,
+      "_rank3EffectValue": 2600,
+      "_rank4EffectValue": 2900,
+      "_rank5EffectValue": 3200
+    },
+    {
+      "_id": 18,
+      "_eventId": 1,
+      "_resourceTypeConstraint": 3,
+      "_characterId": 0,
+      "_bandId": 3,
+      "_cardType": 0,
+      "_tagId": 0,
+      "_memberCardId": 0,
+      "_supportCardId": 0,
+      "_eventBonusType": 2,
+      "_rank1EffectValue": 2000,
+      "_rank2EffectValue": 2300,
+      "_rank3EffectValue": 2600,
+      "_rank4EffectValue": 2900,
+      "_rank5EffectValue": 3200
+    },
+    {
+      "_id": 19,
+      "_eventId": 1,
+      "_resourceTypeConstraint": 3,
+      "_characterId": 0,
+      "_bandId": 0,
+      "_cardType": 2,
+      "_tagId": 0,
+      "_memberCardId": 0,
+      "_supportCardId": 0,
+      "_eventBonusType": 1,
+      "_rank1EffectValue": 1000,
+      "_rank2EffectValue": 1200,
+      "_rank3EffectValue": 1400,
+      "_rank4EffectValue": 1600,
+      "_rank5EffectValue": 1800
+    },
+    {
+      "_id": 20,
+      "_eventId": 1,
+      "_resourceTypeConstraint": 3,
+      "_characterId": 0,
+      "_bandId": 0,
+      "_cardType": 2,
+      "_tagId": 0,
+      "_memberCardId": 0,
+      "_supportCardId": 0,
+      "_eventBonusType": 2,
+      "_rank1EffectValue": 1000,
+      "_rank2EffectValue": 1200,
+      "_rank3EffectValue": 1400,
+      "_rank4EffectValue": 1600,
+      "_rank5EffectValue": 1800
+    }
+  ]
+}

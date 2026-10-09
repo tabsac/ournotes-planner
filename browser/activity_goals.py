@@ -22,7 +22,7 @@ def score_row(p,data,row,goal,mode,consumed,reward_cache=None):
  def reward(rank):
   k=(mode,consumed,rank,row['bonuses_10000']['event_pt'],row['bonuses_10000']['shop_pt'])
   if reward_cache is not None and k in reward_cache:return reward_cache[k]
-  value=preview(data.snapshot,rank,consumed,k[3],k[4])['gained']
+  value=preview(data.snapshot,rank,consumed,k[3],k[4],event_id=data.event['event_id'])['gained']
   if reward_cache is not None:
    if len(reward_cache)>10000:reward_cache.clear()
    reward_cache[k]=value

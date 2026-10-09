@@ -4131,6 +4131,54 @@
    "calculation_basis": "skip.rs::converted_note_count: iterate every runtime note in enumeration order; add its MasterLiveNoteParameter._scorePercent (missing type adds nothing) using wrapping i32; convert sum to float32, divide by float32(100), then num.rs::ceil_to_i32. This divisor is not the full-combo count."
   },
   {
+   "score_id": 10011100,
+   "music_id": 100111,
+   "difficulty": "easy",
+   "source_sha256": "719bf4285efd08ff3547e136f102c3e5b4f87030bd607d7c249c261fac3adf36",
+   "saved_path": "normalized/converted_charts/100111/easy.json",
+   "converted_record_sha256": "8f056dda30169a272752dcf385ac8ffc6f595e80327c39854c03a34c5a7b31ad",
+   "judgement_count": 225,
+   "score_denominator": 94,
+   "score_percent_sum_i32": 9360,
+   "calculation_basis": "skip.rs::converted_note_count: iterate every runtime note in enumeration order; add its MasterLiveNoteParameter._scorePercent (missing type adds nothing) using wrapping i32; convert sum to float32, divide by float32(100), then num.rs::ceil_to_i32. This divisor is not the full-combo count."
+  },
+  {
+   "score_id": 10011103,
+   "music_id": 100111,
+   "difficulty": "expert",
+   "source_sha256": "0ab8ba2fb7329af6d83e04b7fbca264b1a7a4e5f9e57ed1862f308cf94fca603",
+   "saved_path": "normalized/converted_charts/100111/expert.json",
+   "converted_record_sha256": "6dc62e11babe418629c9de982339429c90671b5fb4cb6a98f8137fca5177508a",
+   "judgement_count": 965,
+   "score_denominator": 618,
+   "score_percent_sum_i32": 61760,
+   "calculation_basis": "skip.rs::converted_note_count: iterate every runtime note in enumeration order; add its MasterLiveNoteParameter._scorePercent (missing type adds nothing) using wrapping i32; convert sum to float32, divide by float32(100), then num.rs::ceil_to_i32. This divisor is not the full-combo count."
+  },
+  {
+   "score_id": 10011102,
+   "music_id": 100111,
+   "difficulty": "hard",
+   "source_sha256": "f984fcdbfc64887c9717fcc488627e836cc210e86ea0de5d03e9b3cd47f3b056",
+   "saved_path": "normalized/converted_charts/100111/hard.json",
+   "converted_record_sha256": "d3588d648852c9b011bb2787b12d5e07aea2b43f603d861b4453a53253c5ff99",
+   "judgement_count": 731,
+   "score_denominator": 467,
+   "score_percent_sum_i32": 46640,
+   "calculation_basis": "skip.rs::converted_note_count: iterate every runtime note in enumeration order; add its MasterLiveNoteParameter._scorePercent (missing type adds nothing) using wrapping i32; convert sum to float32, divide by float32(100), then num.rs::ceil_to_i32. This divisor is not the full-combo count."
+  },
+  {
+   "score_id": 10011101,
+   "music_id": 100111,
+   "difficulty": "normal",
+   "source_sha256": "90eb0c3510b1d5b161a8d1f27c00ab8a9caa219d2e0a00e0ae42ade9c099d132",
+   "saved_path": "normalized/converted_charts/100111/normal.json",
+   "converted_record_sha256": "4696b6c5798a2bcdd6bd391a8047ef778a5fe2d39a5547d37b6bb92836f32e8f",
+   "judgement_count": 571,
+   "score_denominator": 280,
+   "score_percent_sum_i32": 27940,
+   "calculation_basis": "skip.rs::converted_note_count: iterate every runtime note in enumeration order; add its MasterLiveNoteParameter._scorePercent (missing type adds nothing) using wrapping i32; convert sum to float32, divide by float32(100), then num.rs::ceil_to_i32. This divisor is not the full-combo count."
+  },
+  {
    "score_id": 10011200,
    "music_id": 100112,
    "difficulty": "easy",
@@ -4182,5 +4230,5 @@
  "converter_commit": "b1e12c4ab31cfed6cd453e562aeeb66c3821af83",
  "data_commit": "0f8644dd85b7c3d21794fb3f718e48773cd1cc60",
  "scope": "Formal conversion / Master FC agreement; not real-play validation",
- "charts_checked": 348
+ "charts_checked": 352
 }

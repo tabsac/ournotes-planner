@@ -16,3 +16,6 @@ docs/** -text
 browser/license-source/** -text
 licenses/** -text
 THIRD-PARTY-NOTICES.txt -text
+
+# Snapshot bytes are verified against the recorded source hashes.
+browser/snapshot-override/** -text

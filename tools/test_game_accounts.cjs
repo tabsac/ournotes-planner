@@ -30,6 +30,12 @@ const server=http.createServer(async(req,res)=>{
  await page.goto('http://127.0.0.1:'+server.address().port);await page.waitForFunction(()=>window.ready);
  assert.equal(await page.locator('[data-select]').count(),0);
  await page.locator('#siteMenuToggle').click();assert.equal(await page.locator('#siteMenu').isVisible(),true);await page.waitForTimeout(250);assert.equal(await page.locator('.site-menu-lines').evaluate(el=>getComputedStyle(el).transform),'matrix(0, 1, -1, 0, 0, 0)');await page.keyboard.press('Escape');assert.equal(await page.locator('#siteMenu').isVisible(),false);
+ const ball=await page.locator('#siteMenuToggle').boundingBox();
+ await page.mouse.move(ball.x+26,ball.y+26);await page.mouse.down();await page.mouse.move(300,110,{steps:8});await page.mouse.up();
+ assert.equal(await page.locator('#siteMenu').isVisible(),false,'drag must not open menu');
+ const moved=await page.locator('#siteMenuToggle').boundingBox();assert(moved.y<200&&moved.x>200);
+ await page.locator('#siteMenuToggle').click();const menuBox=await page.locator('#siteMenu').boundingBox();assert(menuBox.x>=0&&menuBox.x+menuBox.width<=390);
+ assert.equal(await page.locator('#siteMenu').evaluate(e=>e.getAnimations().length),1,'opening should animate');await page.keyboard.press('Escape');
  const u='744532239894985508',v='744532239894985509';
  await page.evaluate(uid=>window.PlannerGameAccounts.importPackage(window.test.doc(uid,'First')),u);
  await page.evaluate(()=>window.test.saveRecord({accountId:window.PlannerGameAccounts.uid,entries:[{song_id:1}]}));
@@ -38,7 +44,7 @@ const server=http.createServer(async(req,res)=>{
  await page.evaluate(uid=>window.PlannerGameAccounts.importPackage(window.test.doc(uid,'Second updated')),v);assert.equal(await page.locator('[data-select]').count(),2);
  await page.locator('[data-select="'+u+'"]').click();assert.equal(await page.evaluate(()=>window.test.state().name),'First');assert.equal(await page.evaluate(()=>window.test.loadScores().accountId),u);
  await page.locator('[data-up="'+v+'"]').click();assert.equal(await page.locator('[data-select]').first().getAttribute('data-select'),v);
- await page.locator('[data-remove="'+u+'"]').click();assert.equal(await page.locator('#deleteGameAccount').isVisible(),true);await page.locator('#deleteGameAccount button[value=no]').click();assert.equal(await page.locator('[data-select]').count(),2);
+ await page.locator('[data-remove="'+u+'"]').click();assert.equal(await page.locator('#deleteGameAccount').isVisible(),true);const symmetry=await page.locator('.game-delete-actions').evaluate(e=>{const r=e.getBoundingClientRect(),a=e.children[0].getBoundingClientRect(),b=e.children[1].getBoundingClientRect();return Math.abs((a.x+a.width/2)+(b.x+b.width/2)-(2*r.x+r.width));});assert(symmetry<1);await page.locator('#deleteGameAccount button[value=no]').click();assert.equal(await page.locator('[data-select]').count(),2);
  await page.locator('[data-remove="'+u+'"]').click();await page.locator('#deleteGameAccount button[value=yes]').click();await page.waitForFunction(uid=>window.PlannerGameAccounts.uid!==uid,u);assert.equal(await page.locator('[data-select]').count(),1);assert.equal(await page.evaluate(()=>window.test.loadScores()),null);
  await page.evaluate(()=>window.test.busy(true));const blocked=await page.evaluate(async uid=>{try{await window.PlannerGameAccounts.importPackage(window.test.doc(uid,'Blocked'));return false;}catch{return true;}},u);assert.equal(blocked,true);await page.evaluate(()=>window.test.busy(false));
  await page.reload();await page.waitForFunction(()=>window.ready);assert.equal(await page.evaluate(()=>window.PlannerGameAccounts.uid),v);assert.equal(await page.evaluate(()=>window.test.state().name),'Second updated');

@@ -305,6 +305,7 @@ def main():
     print("   manifest %d 个文件，其中 Master 表 %d 张" % (len(files), len(remote)))
 
     src, prefix, base_tables = upstream_baseline()
+    base_tables = sorted(set(base_tables) | {"MasterVip", "MasterArenaMusic", "MasterMemoryMusicGroup", "MasterMemoryMusic", "MasterLiveJudgementTiming"})
     print("   当前快照：%s（%d 张表）" % (prefix, len(base_tables)))
 
     idx = {}

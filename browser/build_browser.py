@@ -112,6 +112,14 @@ def patch_runtime_source(relative, raw):
     # （Windows 上 write_text 默认写 CRLF，正好会被这一步"吃掉"，所以症状是校验不过。）
     text = raw.decode("utf-8").replace("\r\n", "\n")
     if relative == "planner_core.py":
+        text = text.replace('self.event = read_json(self.snapshot / "normalized/event_1.json")', 'self.event = read_json(self.snapshot / "normalized/current_event.json")')
+        text = text.replace('_eventId=1, _liveMusicId=sid', '_eventId=self.data.event["event_id"], _liveMusicId=sid')
+        text = text.replace('r["_eventId"] == 1 and', 'r["_eventId"] == data.event["event_id"] and')
+        text = text.replace('c["_eventId"] == 1 and', 'c["_eventId"] == self.event["event_id"] and')
+        text = text.replace('self.index["MasterEvent"][1]', 'self.index["MasterEvent"][self.event["event_id"]]')
+        text = text.replace('eb.calculate_deck_bonuses(data.snapshot, profile, mids, sids)', 'eb.calculate_deck_bonuses(data.snapshot, profile, mids, sids, event_id=data.event["event_id"])')
+        text = text.replace('spec.get("difficulty"), 1, ordinary=', 'spec.get("difficulty"), 1, event_id=data.event["event_id"], ordinary=')
+        text = text.replace('raw["bonuses_10000"]["shop_pt"])["gained"]', 'raw["bonuses_10000"]["shop_pt"], event_id=data.event["event_id"])["gained"]')
         # 养成校验：道具等级下界 1 -> 0
         text = replace_once(text, '· 道具等级",\n              1, cap, "facility"',
                                   '· 道具等级",\n              0, cap, "facility"')
@@ -171,7 +179,8 @@ def snapshot_digest():
     event = {}
     events = read_snapshot_table(raw, "MasterEvent")
     if events:
-        row = events[0]
+        from snapshot_release import current_event
+        row = current_event(events)
         event = {"id": row.get("_id"),
                  "startAt": str(row.get("_startAt") or ""),
                  "endAt": str(row.get("_endAt") or "")}
@@ -203,6 +212,8 @@ def format_level(value):
 
 
 def main():
+    from snapshot_release import normalize_events
+    normalize_events(HERE, read_snapshot_table)
     # Fetch validated server art before building; failure stops a stale release.
     from sync_web_images import sync
     sync(HERE)
@@ -280,6 +291,8 @@ def main():
             included.append(relative)
             added.append(relative)
     (PUBLIC / "planner-runtime.zip").write_bytes(payload.getvalue())
+    from snapshot_release import export_native
+    export_native(HERE, PUBLIC / "planner-runtime.zip")
     # 角色立绘 / 道具图标（本地生成，随网页提供，无外链）
     for image_dir, src_dir in (("card-images", "card"), ("character-images", "character"), ("item-images", "facility"),
                                ("jacket-images", "jacket"), ("ui-images", "ui"), ("avatar-images", "avatar")):
@@ -413,6 +426,10 @@ def main():
     html = html.replace('data-tab="cloud">账号', 'data-tab="cloud">登录与 QQ 关联')
     html = html.replace(' <section id="cloud" class="tab-page" hidden><div id="cloudRoot"></div></section>', ' <section id="home" class="tab-page" hidden><div class="panel"><div class="section-kicker">账号中心</div><h2>我的 Our Notes</h2><p class="muted">登录网页账号，关联 QQ，并管理已上传的游戏账号。</p></div><div id="cloudRoot"></div><div class="panel" id="gameAccountsRoot"></div></section>')
     html = html.replace('新建个人卡库', '重置当前卡库')
+    # Retire the historical verification page; keep live data checks in software.
+    html = re.sub(r'<button[^>]*data-tab="evidence"[^>]*>.*?</button>', '', html, flags=re.S)
+    html = re.sub(r'<section id="evidence".*?</section>', '', html, flags=re.S)
+    app = app.replace('function renderEvidence() {', 'function renderEvidence() { return;')
     (HERE / "index.html").write_text(html, "utf-8", newline="\n")
     (HERE / "style.css").write_bytes(css + b"\n" + (HERE / "account.css").read_bytes() + b"\n" + (HERE / "site-shell.css").read_bytes())
     app = replace_once(app, 'const STORE = "ournotes-local-planner-v1-profile";', 'const STORE = "ournotes-browser-planner-v1-profile:" + window.Planner.scope;')
@@ -422,7 +439,7 @@ def main():
         'if (["plan","inventory","growth","evidence","software"].includes(tab)) showTab(tab);',
         'if (["home","plan","inventory","growth","evidence","account","b25","cloud","software"].includes(tab)) showTab(tab);')
     app = app.replace('function replaceState(x) {', 'function replaceState(x) { const uid=window.PlannerGameAccounts?.uid; if(uid && !window.PlannerGameAccounts.switching){ const imported=String(x.account_import?.account_id_text || x.account_import?.account_id || ""); if(imported && imported!==uid) throw new Error("请通过账号包导入页面上传这个 UID，再切换游戏账号"); x=clone(x); x.account_import=clone(state.account_import); }')
-    app = app.replace('function showTab(tab) {' , 'function showTab(tab) { if(tab === "cloud") tab = "home";')
+    app = app.replace('function showTab(tab) {' , 'function showTab(tab) { if(tab === "cloud" || tab === "evidence") tab = "home";')
     app = app.replace('const tab = location.hash.slice(1);', 'const tab = location.hash.slice(1) || "home";')
     profile_code = '''import {createProfileStorage} from './profile-storage.js';
 function profileWarning(id, text) {
