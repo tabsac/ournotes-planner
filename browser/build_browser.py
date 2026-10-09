@@ -87,6 +87,7 @@ def inject_cloud_config(html):
 
 def add_runtime(archive, name, raw):
     entry = zipfile.ZipInfo(name, date_time=(2026, 10, 1, 0, 0, 0))
+    entry.create_system = 3  # Identical runtime bytes on Windows and Linux.
     entry.compress_type = zipfile.ZIP_DEFLATED
     entry.external_attr = 0o644 << 16
     archive.writestr(entry, raw)
@@ -675,12 +676,12 @@ window.PlannerAccount = {
     native_source=HERE/'deck-native-assets'
     native_root=PUBLIC/'deck-local'
     if native_source.is_dir():
-        native_hash=hashlib.sha256(b''.join(p.read_bytes() for p in sorted(native_source.glob('*')) if p.is_file())).hexdigest()
+        native_hash=hashlib.sha256(b''.join(p.read_bytes() for p in sorted(native_source.glob('*'), key=lambda p:p.name) if p.is_file())).hexdigest()
         shutil.copytree(native_source,native_root/native_hash,dirs_exist_ok=True)
         report['local_deck_engine']=native_hash
     native_root=PUBLIC / 'deck-local'
     if (native_root/'ournotes_recommend_wasm_bg.wasm').is_file():
-        report['local_deck_engine']=hashlib.sha256(b''.join(p.read_bytes() for p in sorted(native_root.glob('*')) if p.is_file())).hexdigest()
+        report['local_deck_engine']=hashlib.sha256(b''.join(p.read_bytes() for p in sorted(native_root.glob('*'), key=lambda p:p.name) if p.is_file())).hexdigest()
     report['static_files']={p.relative_to(PUBLIC).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(PUBLIC.rglob('*')) if p.is_file() and p.name!='build-info.json'}
     (PUBLIC / "build-info.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), "utf-8")
     print(json.dumps({k: v for k, v in report.items() if k not in ("payload_files", "static_files")}, ensure_ascii=False))
