@@ -1,0 +1,116 @@
+--- a/tools/planner_api.py
++++ b/tools/planner_api.py
+@@ -81,6 +81,10 @@
+   id TEXT PRIMARY KEY, owner TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', summary TEXT NOT NULL DEFAULT '',
+   payload TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+ CREATE INDEX IF NOT EXISTS results_owner ON results(owner, created_at DESC);
++CREATE TABLE IF NOT EXISTS game_accounts (
++  owner TEXT NOT NULL, uid TEXT NOT NULL, name TEXT NOT NULL DEFAULT '',
++  position INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0,
++  PRIMARY KEY(owner,uid));
+ CREATE TABLE IF NOT EXISTS login_codes (
+   code TEXT PRIMARY KEY, qq TEXT NOT NULL, expires_at INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0);
+ CREATE TABLE IF NOT EXISTS bind_codes (
+@@ -156,6 +160,21 @@
+     if isinstance(value, list):
+         return [strip_secrets(v, path + "[%d]" % i, out, depth + 1)[0] for i, v in enumerate(value)], out
+     return value, out
++
++
++
++def game_uid(payload):
++    if not isinstance(payload, dict):
++        return ""
++    doc = payload.get("document") or payload.get("actual_inputs") or payload
++    imported = doc.get("account_import", {}) if isinstance(doc, dict) else {}
++    value = payload.get("gameUid") or imported.get("account_id_text") or imported.get("account_id")
++    if not value and (payload.get("kind") == "b25" or isinstance(payload.get("entries"),list)):
++        value = (payload.get("record") or payload.get("card") or payload).get("accountId")
++    if isinstance(value, (int,float)) and (isinstance(value,bool) or abs(value)>9007199254740991):
++        return ""
++    value = str(value or "")
++    return value if re.fullmatch(r"[0-9]{1,30}", value) else ""
+ 
+ 
+ def result_kind(raw):
+@@ -616,6 +635,51 @@
+                 conn.execute("UPDATE accounts SET qq=NULL, updated_at=? WHERE id=?", (now(), acc["id"]))
+             return self._send(204)
+ 
++        # Game accounts are created by package import; edits cannot resurrect a deleted UID.
++        if path == "/api/game-accounts":
++            with closing(db()) as conn, conn:
++                conn.execute("BEGIN IMMEDIATE")
++                # Migrate existing imported libraries, excluding deliberately deleted accounts.
++                for row in conn.execute("SELECT payload FROM results WHERE owner=?", (acc["id"],)).fetchall():
++                    payload = json.loads(row["payload"])
++                    uid = game_uid(payload)
++                    if uid and payload.get("kind") == "profile":
++                        doc = payload.get("document") or {}
++                        conn.execute("INSERT OR IGNORE INTO game_accounts VALUES (?,?,?,(SELECT COALESCE(MAX(position),-1)+1 FROM game_accounts WHERE owner=?),0)",
++                                     (acc["id"], uid, str(doc.get("name") or uid)[:120], acc["id"]))
++                if method == "POST":
++                    body = self._body()
++                    doc = body.get("document") if isinstance(body, dict) else None
++                    uid = game_uid({"document": doc})
++                    if not uid or not isinstance(doc.get("profile", {}).get("inventory"), dict):
++                        return self._fail(422, "unprocessable", "请上传包含 UID 的账号包")
++                    conn.execute("INSERT INTO game_accounts VALUES (?,?,?,(SELECT COALESCE(MAX(position),-1)+1 FROM game_accounts WHERE owner=?),0) ON CONFLICT(owner,uid) DO UPDATE SET name=excluded.name,deleted=0",
++                                 (acc["id"],uid,str(doc.get("name") or uid)[:120],acc["id"]))
++                elif method == "PUT":
++                    body = self._body()
++                    order = body.get("order") if isinstance(body, dict) else None
++                    existing = [r["uid"] for r in conn.execute("SELECT uid FROM game_accounts WHERE owner=? AND deleted=0", (acc["id"],))]
++                    if not isinstance(order,list) or len(order)!=len(existing) or set(order)!=set(existing):
++                        return self._fail(409,"conflict","账号列表已变化，请刷新后排序")
++                    for i,uid in enumerate(order):
++                        conn.execute("UPDATE game_accounts SET position=? WHERE owner=? AND uid=?", (i,acc["id"],uid))
++                elif method != "GET":
++                    return self._fail(405,"method_not_allowed","不支持此操作")
++                rows=conn.execute("SELECT uid,name,position FROM game_accounts WHERE owner=? AND deleted=0 ORDER BY position,uid", (acc["id"],)).fetchall()
++            return self._send(200,[dict(r) for r in rows])
++
++        if method == "DELETE" and path.startswith("/api/game-accounts/"):
++            uid=path[len("/api/game-accounts/"):]
++            with closing(db()) as conn, conn:
++                conn.execute("BEGIN IMMEDIATE")
++                row=conn.execute("SELECT uid FROM game_accounts WHERE owner=? AND uid=? AND deleted=0", (acc["id"],uid)).fetchone()
++                if not row:
++                    return self._fail(404,"not_found","没有这个游戏账号")
++                ids=[r["id"] for r in conn.execute("SELECT id,payload FROM results WHERE owner=?", (acc["id"],)) if game_uid(json.loads(r["payload"]))==uid]
++                conn.executemany("DELETE FROM results WHERE owner=? AND id=?", [(acc["id"],rid) for rid in ids])
++                conn.execute("UPDATE game_accounts SET deleted=1 WHERE owner=? AND uid=?", (acc["id"],uid))
++            return self._send(200,{"deleted":len(ids),"uid":uid})
++
+         # ⑥ 结果 CRUD（归属 = 账号）
+         if path == "/api/results":
+             if method == "GET":
+@@ -623,7 +687,7 @@
+                     rows = conn.execute("SELECT id,title,summary,payload,version,created_at,updated_at"
+                                         " FROM results WHERE owner=? ORDER BY created_at DESC", (acc["id"],)).fetchall()
+                 return self._send(200, [{"id": r["id"], "kind": result_kind(r["payload"]),
+-                                         "title": r["title"], "summary": r["summary"], "version": r["version"],
++                                         "gameUid": game_uid(json.loads(r["payload"])), "title": r["title"], "summary": r["summary"], "version": r["version"],
+                                          "createdAt": r["created_at"], "updatedAt": r["updated_at"],
+                                          "size": len(r["payload"].encode("utf-8"))}
+                                         for r in rows])
+@@ -637,6 +701,9 @@
+                     return self._fail(413, "too_large", "单条上限 256 KB")
+                 with closing(db()) as conn, conn:
+                     conn.execute("BEGIN IMMEDIATE")
++                    uid = game_uid(payload)
++                    if uid and conn.execute("SELECT 1 FROM game_accounts WHERE owner=? AND uid=? AND deleted=1",(acc["id"],uid)).fetchone():
++                        return self._fail(409,"game_account_deleted","这个游戏账号已删除；需要重新上传账号包")
+                     count = conn.execute("SELECT COUNT(*) AS c FROM results WHERE owner=?",
+                                          (acc["id"],)).fetchone()["c"]
+                     if count >= MAX_RESULTS:
+@@ -682,6 +749,9 @@
+                 if len(blob.encode("utf-8")) > MAX_PAYLOAD:
+                     return self._fail(413, "too_large", "单条上限 256 KB")
+                 with closing(db()) as conn, conn:
++                    uid = game_uid(payload)
++                    if uid and conn.execute("SELECT 1 FROM game_accounts WHERE owner=? AND uid=? AND deleted=1",(acc["id"],uid)).fetchone():
++                        return self._fail(409,"game_account_deleted","这个游戏账号已删除；需要重新上传账号包")
+                     updated = conn.execute("UPDATE results SET payload=?, version=version+1, updated_at=?"
+                                            " WHERE id=? AND owner=? AND version=?",
+                                            (blob, now(), rid, acc["id"], expected_version))

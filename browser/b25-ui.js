@@ -92,7 +92,8 @@ const lvl = v => (v == null || v === "") ? "-" : String(Number(Number(v).toFixed
 
 function key() {
     const scope = window.Planner?.scope;
-    return scope ? `${STORE_KEY}:${scope}` : STORE_KEY;
+    const suffix = window.PlannerGameAccounts?.uid ? ':'+(window.PlannerGameAccounts.owner)+':'+window.PlannerGameAccounts.uid : '';
+    return (scope ? `${STORE_KEY}:${scope}` : STORE_KEY)+suffix;
 }
 
 /** 存档。只留渲染要用的字段。 */
@@ -138,6 +139,8 @@ export function loadScores() {
  */
 export function saveRecord(record) {
     if (!record || !Array.isArray(record.entries) || !record.entries.length) return null;
+    const uid=window.PlannerGameAccounts?.uid;
+    if(uid && String(record.accountId || '')!==uid) throw Error('请先切换到这份成绩对应的游戏账号');
     const next = {...record, savedAt: record.savedAt || new Date().toISOString()};
     try {
         localStorage.setItem(key(), JSON.stringify(next));

@@ -91,7 +91,8 @@ export function buildImportPayload(profile, report, catalog) {
         settings: currentSettings(),
         ...candidates,
         account_import: {
-            account_id: report?.account_id ?? null,
+            account_id: report?.account_id_text || String(report?.account_id ?? ""),
+            account_id_text: report?.account_id_text || String(report?.account_id ?? ""),
             member_count: report?.member_count ?? profile.inventory.members.length,
             snap_count: report?.snap_count ?? profile.inventory.snaps.length,
             character_count: report?.character_count ?? profile.character_ranks.length,
@@ -298,11 +299,15 @@ export function mountAccountImport(root) {    if (!root) return;
         const saved = {pending: true};
         report.querySelector("#accountB25").innerHTML = b25TeaserHtml(payload.scores, saved);
         bindB25Teaser(report.querySelector("#accountB25"));
-        report.querySelector("#accountApply").addEventListener("click", () => {
+        report.querySelector("#accountApply").addEventListener("click", async () => {
+            const applyButton=report.querySelector('#accountApply');
+            if(applyButton.disabled)return;
+            applyButton.disabled=true;
             try {
                 const catalog = window.PlannerAccount.catalog();
                 const wrapper = buildImportPayload(profile, info, catalog);
-                window.PlannerAccount.apply(wrapper, "账号包已导入，请核对实际养成后计算。");
+                await window.PlannerGameAccounts.importPackage(wrapper);
+                window.PlannerGameAccounts.clearB25();
                 const saved = saveScores(payload.scores, {
             playerName: info.player_name,
             accountId: info.account_id_text || info.account_id,
@@ -312,7 +317,7 @@ export function mountAccountImport(root) {    if (!root) return;
                 bindB25Teaser(report.querySelector("#accountB25"));
             } catch (error) {
                 status("导入失败：" + (error?.message || error), "error");
-            }
+            } finally {applyButton.disabled=false;}
         });
         report.querySelector("#accountDiscard").addEventListener("click", () => {
             pending = null; report.hidden = true; status("");

@@ -388,7 +388,7 @@ export function getResult(id) {
 }
 
 export async function createResult({title, summary, payload}) {
-    const prepared = preparePayload(payload);
+    const prepared = preparePayload(gameUid() ? {...payload, gameUid:gameUid()} : payload);
     const data = await request("/api/results", {
         method: "POST", body: {title, summary, payload: prepared.payload},
     });
@@ -397,7 +397,7 @@ export async function createResult({title, summary, payload}) {
 }
 
 export async function updateResult(id, {payload, version}) {
-    const prepared = preparePayload(payload);
+    const prepared = preparePayload(gameUid() ? {...payload, gameUid:gameUid()} : payload);
     const data = await request("/api/results/" + encodeURIComponent(id), {
         method: "PUT", body: {payload: prepared.payload, version},
     });
@@ -414,8 +414,15 @@ export function deleteResult(id) {
  * 指针是**跟着账号**的：记的时候带上 accountId，读的时候若与当前账号不符就当没有
  * （并顺手清掉）。这样「换账号登录还拿旧 id 去 PUT → 404」不会再发生，
  * 而同账号重新登录（改密/401 之后）仍然认得回原来那条。 */
+export const gameUid = () => window.PlannerGameAccounts?.uid || '';
+export const dataOwner = () => `${token() && currentAccount()?.id || 'local'}${gameUid() ? ':game:'+gameUid() : ''}`;
+const resultKey = which => (which === 'profile' ? PROFILE_RESULT_KEY : RESULT_KEY) + (gameUid() ? ':'+(currentAccount()?.id || 'local')+':'+gameUid() : '');
+export const gameAccounts = () => request('/api/game-accounts');
+export const registerGameAccount = document => request('/api/game-accounts', {method:'POST',body:{document:preparePayload(document).payload}});
+export const reorderGameAccounts = order => request('/api/game-accounts', {method:'PUT',body:{order}});
+export const deleteGameAccount = uid => request('/api/game-accounts/'+encodeURIComponent(uid), {method:'DELETE'});
 export function linkedResult(which = "b25") {
-    const raw = read(which === "profile" ? PROFILE_RESULT_KEY : RESULT_KEY);
+    const raw = read(resultKey(which));
     if (!raw) return null;
     let info = null;
     try { info = JSON.parse(raw); } catch { return null; }
@@ -432,7 +439,7 @@ export function setLinkedResult(info, which = "b25") {
         const accountId = currentAccount()?.id;
         if (accountId) info = {...info, accountId};
     }
-    write(which === "profile" ? PROFILE_RESULT_KEY : RESULT_KEY, info ? JSON.stringify(info) : null);
+    write(resultKey(which), info ? JSON.stringify(info) : null);
 }
 
 /**
@@ -441,9 +448,9 @@ export function setLinkedResult(info, which = "b25") {
  * 返回 `{conflict: true, error}` 表示版本冲突（交给界面提示），其它错误照抛。
  */
 export async function saveLinkedResult({which = "b25", title, summary, payload, version} = {}) {
-    const owner = currentAccount()?.id, bearer = token();
+    const owner = currentAccount()?.id, bearer = token(), uid = gameUid();
     const checkIdentity = () => {
-        if (owner !== currentAccount()?.id || bearer !== token()) throw new CloudError("session_changed", "账号已切换，请重新同步");
+        if (owner !== currentAccount()?.id || bearer !== token() || uid !== gameUid()) throw new CloudError("session_changed", "账号已切换，请重新同步");
     };
     const linked = linkedResult(which);
     if (linked?.id) {

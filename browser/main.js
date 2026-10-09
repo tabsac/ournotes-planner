@@ -1,3 +1,4 @@
+import * as cloud from './cloud-api.js';
 import {createActivityStore} from './activity-results.js';
 const baseURL = new URL('./', location.href);
 const scope = baseURL.pathname;
@@ -64,14 +65,15 @@ async function start() {
   await ensureIsolation();
   const database = await openDatabase();
   const activityStore = createActivityStore(database, scope);
+  let cacheOwner=null;
   const readCache = () => new Promise((resolve, reject) => {
-    const request = database.transaction('state').objectStore('state').get('cache');
+    const request = database.transaction('state').objectStore('state').get('cache:'+(cacheOwner||cloud.dataOwner()));
     request.onsuccess = () => resolve(request.result || null);
     request.onerror = () => reject(request.error);
   });
   const writeCache = bytes => new Promise((resolve, reject) => {
     const tx = database.transaction('state', 'readwrite');
-    tx.objectStore('state').put(bytes, 'cache');
+    tx.objectStore('state').put(bytes, 'cache:'+(cacheOwner||cloud.dataOwner()));
     tx.oncomplete = resolve;
     tx.onerror = tx.onabort = () => reject(tx.error || new Error('续算存储空间不足。'));
   });
@@ -174,6 +176,8 @@ async function start() {
     if (cached) {job = {id:crypto.randomUUID(),status:'complete',reused:true,done:1,total:1,elapsed_seconds:0,result:cached.result,stage:'已恢复计算结果'};void activityStore.reuse(cached, activityOwner);return {job_id:job.id};}
     await lockCache();
     try {
+      if(activityOwner!==activityStore.owner() || window.PlannerGameAccounts?.owner!==(cloud.token()&&cloud.currentAccount()?.id||'local'))throw Error('登录已变化，请等待账号列表同步后重新计算');
+      cacheOwner=activityOwner;
       await persisted;
       await restoreCache();
       // 取消标志首选 SharedArrayBuffer：Python 在同步计算中也能读到它。
@@ -192,10 +196,10 @@ async function start() {
         const message = error.message.trim().split('\n').at(-1);
         Object.assign(job, {status: 'error', error: message});
       }).finally(() => {
-        terminateSolver(); sharedCancel = null; releaseLock?.(); releaseLock = null;
+        terminateSolver(); sharedCancel = null; releaseLock?.(); releaseLock = null;cacheOwner=null;
       });
       return {job_id: id};
-    } catch (error) {releaseLock?.(); releaseLock = null; throw error;}
+    } catch (error) {releaseLock?.(); releaseLock = null;cacheOwner=null; throw error;}
   }
   async function request(path, options = {}) {
     const body = options.body ? JSON.parse(options.body) : {};
@@ -226,6 +230,18 @@ async function start() {
   await restoreCache();
   await import('./generated-app.js');
   await window.PlannerProfile?.ready;
+  const {mountGameAccounts} = await import('./game-accounts.js');
+  await mountGameAccounts(database);
+  const {mountSiteShell} = await import('./site-shell.js');
+  mountSiteShell();
+  cloud.onAuthChange(()=>{
+    if(job?.status==='running') {
+      if(sharedCancel)Atomics.store(new Int32Array(sharedCancel),0,1);
+      else worker.postMessage({type:'cancel'});
+      terminateSolver();
+    }
+  });
+  window.addEventListener('ournotes-game-account-changed', () => { window.PlannerGameAccounts.cacheSwitching=true; void restoreCache().catch(storageError).finally(()=>{window.PlannerGameAccounts.cacheSwitching=false;}); });
   const {mountActivity} = await import('./activity-ui.js');
   mountActivity(activityStore);
   const {mountDeckBatch} = await import('./deck-batch-ui.js');

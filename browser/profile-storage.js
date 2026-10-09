@@ -19,6 +19,11 @@ export function createProfileStorage(key, onConflict, onError) {
   });
   return {
     get outOfDate() {return stale;},
+    select(nextKey) {
+      key = nextKey; stale = false;
+      try { previous = localStorage.getItem(key); return previous; }
+      catch { onError(); throw Error('无法读取本地账号数据'); }
+    },
     load() {
       try {previous = localStorage.getItem(key); return previous;}
       catch {onError(); return null;}
@@ -29,6 +34,7 @@ export function createProfileStorage(key, onConflict, onError) {
         // Also catch a change whose storage event has not reached this tab yet.
         if (localStorage.getItem(key) !== previous) {conflict(); return false;}
         localStorage.setItem(key, value); previous = value;
+        window.dispatchEvent(new CustomEvent('ournotes-profile-saved', {detail:value}));
         if (cloudSync) { try {cloudSync(value);} catch { /* 同步失败不影响本地保存 */ } }
         return true;
       } catch {onError(); return false;}

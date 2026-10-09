@@ -5,6 +5,7 @@ async function fixture(){
  let local=doc(1),remote=doc(1),link={id:'a',version:1,fingerprint:JSON.stringify(doc(1))},account={id:'one'},saves=0,profiles=[],installable=true,resolver=null;
  const timers=[];
  const c={CloudError:class extends Error{},currentAccount:()=>account,token:()=>account?'token-'+account.id:null,isConfigured:()=>true,linkedResult:()=>link,setLinkedResult:x=>link=x,preparePayload:x=>({payload:x}),listResults:async()=>profiles,getResult:async()=>({id:'a',version:2,payload:{document:structuredClone(remote)}}),saveLinkedResult:async ({payload})=>{saves++;if(resolver)await new Promise(r=>resolver=r);remote=structuredClone(payload.document);link={...link,version:3};return {id:'a',version:3};},setTimeout:f=>(timers.push(f),timers.length),clearTimeout:()=>{},setInterval:()=>1,window:{addEventListener:()=>{}},Date,JSON,Set};
+ c.gameUid=()=>'';
  vm.createContext(c);vm.runInContext(source,c);
  c.attachProfileCloud({getDocument:()=>structuredClone(local),installDocument:x=>{if(!installable)return false;local=structuredClone(x);c.noteLocalSave();return true;}});
  return {c,timers,get local(){return local},set local(x){local=x},set remote(x){remote=x},get link(){return link},set link(x){link=x},set profiles(x){profiles=x},get saves(){return saves},set account(x){account=x},set installable(x){installable=x},hold(){resolver=true},release(){resolver()}};

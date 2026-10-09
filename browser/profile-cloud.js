@@ -14,7 +14,7 @@
  */
 import {
     CloudError, currentAccount, getResult, isConfigured, linkedResult, listResults,
-    preparePayload, saveLinkedResult, setLinkedResult, token,
+    preparePayload, saveLinkedResult, setLinkedResult, token, gameUid,
 } from "./cloud-api.js";
 
 const PUSH_DEBOUNCE_MS = 4000;
@@ -30,7 +30,7 @@ let installing = false;
 let epoch = 0;
 let lastAuthIdentity = null;
 let poll = null;
-const identity = () => `${currentAccount()?.id ?? ""}:${token() ?? ""}`;
+const identity = () => `${currentAccount()?.id ?? ""}:${token() ?? ""}:${gameUid()}`;
 // Fingerprint is the complete sanitized document, excluding removed secrets.
 // JSON.stringify preserves object enumeration order and array order; no key/card
 // sorting or numeric tolerance is applied. Numbers follow JSON (including -0 -> 0);
@@ -149,7 +149,8 @@ function canSync() {
     // ⚠️ **不要**写成 `!!apiBase()`：同源部署时 apiBase() 返回的是**空串**（不是 null），
     //    空串在 JS 里是 falsy → 整个卡库同步会在同源形态下静默失效（v0.3.0 线上踩过，
     //    服务器侧靠源码级 A/B 定死）。判断「有没有启用云端」一律走 isConfigured()。
-    return isConfigured() && !!token();
+    const games=window.PlannerGameAccounts;
+    return isConfigured() && !!token() && (!games || (!games.switching && !!games.uid && games.owner===currentAccount()?.id));
 }
 
 /**
@@ -243,7 +244,7 @@ function payloadOf(document) {
 /** 列出云端所有卡库类结果（不含 payload，界面按需再取）。 */
 export async function listCloudProfiles() {
     const list = await listResults();
-    return list.filter(item => /个人卡库/.test(item.title || ""));
+    return list.filter(item => /个人卡库/.test(item.title || "") && (!gameUid() || item.gameUid === gameUid()));
 }
 
 /** 取回云端某条卡库并装进应用。 */
@@ -253,6 +254,7 @@ export async function pull(id, {onlyEmpty = false} = {}) {
     if (identity() !== who || epoch !== generation) throw new CloudError("session_changed", "账号已切换");
     const payload = item?.payload;
     const document = payload?.document ?? (payload?.profile ? payload : null);
+    if (gameUid() && String(document?.account_import?.account_id_text || document?.account_import?.account_id || '') !== gameUid()) throw new CloudError('wrong_game_account','请先切换到对应游戏账号');
     if (!document || !document.profile?.inventory) {
         throw new CloudError("empty", "这条结果里没有卡库数据");
     }

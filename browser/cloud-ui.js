@@ -241,7 +241,7 @@ export function mountCloudPanel(root, options = {}) {
     }
 
     function renderResults() {
-        const list = state.results;
+        const list = state.results?.filter(item => !cloud.gameUid() || item.gameUid===cloud.gameUid());
         $("cloudResultsBox").innerHTML = `
           <div class="cloud-head">
             <h4>云端结果</h4>
@@ -412,6 +412,7 @@ export function mountCloudPanel(root, options = {}) {
 
     async function afterAuth(account, okText) {
         setMessage(okText + (account?.qq ? "" : "（还没绑定 QQ，绑了以后找密码/找人都方便）"));
+        await window.PlannerGameAccounts?.syncIdentity();
         // 刚登录：先看看云端有没有这个账号的卡库，有就提示（**不自动覆盖本地**）
         await import("./profile-cloud.js").then(m => m.onAuthChanged(account)).catch(() => {});
         await refreshList();
@@ -455,7 +456,9 @@ export function mountCloudPanel(root, options = {}) {
 
     function loadCard(id) {
         return run(async () => {
+            const captured=cloud.dataOwner(),bearer=cloud.token();
             const item = await cloud.getResult(id);
+            if(captured!==cloud.dataOwner() || bearer!==cloud.token())throw Error('账号已切换，请重新读取');
             const payload = item?.payload;
             if(payload?.kind === 'activity') {if(!onActivityLoaded) throw Error('活动方案暂时无法恢复。');await onActivityLoaded(payload);setMessage('活动方案已恢复，可在收益页下载图片。');return;}
             if (!payload || !Array.isArray(payload.entries) || !payload.entries.length) {
@@ -630,7 +633,7 @@ export function mountCloudPanel(root, options = {}) {
     root.querySelector("#cloudBindClose").addEventListener("click", closeBind);
 
     // 登录态变化（含被 401 踢掉、改密后）都要重画
-    cloud.onAuthChange(account => { render(); import("./profile-cloud.js").then(m => m.onAuthChanged(account)).catch(() => {}); });
+    cloud.onAuthChange(account => { render(); Promise.resolve(window.PlannerGameAccounts?.syncIdentity()).then(() => import("./profile-cloud.js")).then(m => m.onAuthChanged(account)).catch(() => {}); });
     // 卡库同步状态变化也重画（只改状态行，代价很小）
     onProfileSyncChange(sync => {
         state.profileSync = sync;
@@ -658,7 +661,7 @@ export function mountCloudPanel(root, options = {}) {
     // 有 token 就校验一次登录态（失效会被 401 清掉 → 回到登录表）
     if (state.configured && cloud.token()) {
         cloud.refreshSession()
-            .then(async account => { if (account) { setMessage(`已登录 ${account.username}`); await import("./profile-cloud.js").then(m => m.onAuthChanged(account)); } })
+            .then(async account => { if (account) { setMessage(`已登录 ${account.username}`); await window.PlannerGameAccounts?.syncIdentity(); await import("./profile-cloud.js").then(m => m.onAuthChanged(account)); } })
             .catch(() => { /* 401 已经清了 token，界面上会显示登录表 */ })
             .finally(() => { state.checking = false; render(); });
     } else {

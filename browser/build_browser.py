@@ -355,7 +355,7 @@ def main():
     start = html.index(' <section id="software"')
     end = html.index('</section>', start) + len('</section>')
     html = html[:start] + f''' <section id="software" class="tab-page" hidden><div class="panel">
-<div class="section-kicker">无需安装 / 浏览器计算</div><h2>Our Notes 配队网页版 v{VERSION}</h2>
+<div class="section-kicker">无需安装 / 浏览器计算</div><h2>Our Notes planner v{VERSION}</h2>
 <p>计算在你自己的设备上运行，无需登录或安装程序。个人卡库保存在当前浏览器，计算输入不会上传到计算服务器。</p>
 <p>可以导入本地版导出的卡库。换设备、换浏览器或清理网站数据之前，请先导出卡库。</p>
 <p>计算时请保持页面打开。手机切到后台或关闭页面可能中断；已保存的完整步骤可在下次继续。</p>
@@ -366,7 +366,7 @@ def main():
 </div></section>''' + html[end:]
     html = html.replace("卡图已保存在本地", "卡图随网页提供")
     html = html.replace('id="profileBadge" class="badge">截图示例', 'id="profileBadge" class="badge">个人卡库')
-    html = replace_once(html, f'Our Notes 配队与收益 · v{core_version}', f'Our Notes 配队网页版 · v{VERSION} · 模型 v{core_version}')
+    html = replace_once(html, f'Our Notes 配队与收益 · v{core_version}', f'Our Notes planner · v{VERSION} · 模型 v{core_version}')
 
     # ---- 「账号包导入」页：一个 tab 按钮 + 一个容器 section（内容由 account-ui.js 渲染）----
     # ---- 「B25 成绩」页：独立页签，内容由 b25-ui.js 渲染（数据由账号页存进 localStorage）----
@@ -406,14 +406,24 @@ def main():
     html = html.replace("手动 AP 参考采用最不利技能顺序的评级；它是模型条件，不代表实机保证。", "单局目标按技能顺序平均表现比较，高级预算模式采用最低参考评级。结果是模型估算。").replace("以及普通演出、挑战的前三首收益乐曲。", "并比较所选歌曲中合适的队伍。")
     html = html.replace('<label>Boost 总预算', '<label hidden>Boost 总预算').replace('<label>已有 CP', '<label hidden>已有 CP')
     html = html.replace("个人卡库 · 两套队伍 · 完整收益 · 前三首乐曲", "个人卡库 · 活动目标 · 单局推荐与预算规划").replace('data-tab="plan" class="active">收益规划', 'data-tab="plan" class="active">活动组卡')
+    html = html.replace('<title>Our Notes · 配队与收益</title>', '<title>Our Notes planner</title>')
+    html = re.sub(r'<h1>.*?</h1>', '<h1>Our Notes planner<span class="star">✦</span></h1>', html, count=1)
+    html = html.replace(' <nav class="tabs"', ' <button id="siteMenuToggle" class="site-menu-toggle" aria-label="展开功能菜单" aria-expanded="false" aria-controls="siteMenu"><span class="site-menu-lines"><i></i><i></i><i></i></span></button><nav id="siteMenu" hidden class="tabs"')
+    html = html.replace('aria-label="功能页">', 'aria-label="功能页"><button data-tab="home">主页</button>')
+    html = html.replace('data-tab="cloud">账号', 'data-tab="cloud">登录与 QQ 关联')
+    html = html.replace(' <section id="cloud" class="tab-page" hidden><div id="cloudRoot"></div></section>', ' <section id="home" class="tab-page" hidden><div class="panel"><div class="section-kicker">账号中心</div><h2>我的 Our Notes</h2><p class="muted">登录网页账号，关联 QQ，并管理已上传的游戏账号。</p></div><div id="cloudRoot"></div><div class="panel" id="gameAccountsRoot"></div></section>')
+    html = html.replace('新建个人卡库', '重置当前卡库')
     (HERE / "index.html").write_text(html, "utf-8", newline="\n")
-    (HERE / "style.css").write_bytes(css + b"\n" + (HERE / "account.css").read_bytes())
+    (HERE / "style.css").write_bytes(css + b"\n" + (HERE / "account.css").read_bytes() + b"\n" + (HERE / "site-shell.css").read_bytes())
     app = replace_once(app, 'const STORE = "ournotes-local-planner-v1-profile";', 'const STORE = "ournotes-browser-planner-v1-profile:" + window.Planner.scope;')
     # 深链接白名单：上游只列了自己那几页，账号页 / B25 页 / 账号页要补上，否则 #b25 打不开
     app = replace_once(
         app,
         'if (["plan","inventory","growth","evidence","software"].includes(tab)) showTab(tab);',
-        'if (["plan","inventory","growth","evidence","account","b25","cloud","software"].includes(tab)) showTab(tab);')
+        'if (["home","plan","inventory","growth","evidence","account","b25","cloud","software"].includes(tab)) showTab(tab);')
+    app = app.replace('function replaceState(x) {', 'function replaceState(x) { const uid=window.PlannerGameAccounts?.uid; if(uid && !window.PlannerGameAccounts.switching){ const imported=String(x.account_import?.account_id_text || x.account_import?.account_id || ""); if(imported && imported!==uid) throw new Error("请通过账号包导入页面上传这个 UID，再切换游戏账号"); x=clone(x); x.account_import=clone(state.account_import); }')
+    app = app.replace('function showTab(tab) {' , 'function showTab(tab) { if(tab === "cloud") tab = "home";')
+    app = app.replace('const tab = location.hash.slice(1);', 'const tab = location.hash.slice(1) || "home";')
     profile_code = '''import {createProfileStorage} from './profile-storage.js';
 function profileWarning(id, text) {
   let panel = document.getElementById(id);
@@ -445,14 +455,16 @@ const profileStore = createProfileStorage(STORE, () => {
 window.PlannerProfile = {
   document: () => state ? clone(state) : null,
   install: (document) => {
-    if (!state || !catalog || jobId || profileStore.outOfDate) return false;
+    if (!state || !catalog || jobId || startingJob || profileStore.outOfDate || window.PlannerGameAccounts?.calculating) return false;
     try {replaceState(document); window.dispatchEvent(new Event('ournotes-activity-inputs-installed'));} catch {return false;}
     return true;
   },
+  canInstall: () => !!state && !!catalog && !jobId && !startingJob && !profileStore.outOfDate && !window.PlannerGameAccounts?.calculating && !window.PlannerGameAccounts?.cacheSwitching,
+  empty: () => normalizeImport({schema_version:1,name:'未上传游戏账号',profile:{inventory:{members:[],snaps:[]},facilities:[],character_ranks:[],character_total_rank:null,tgw_card_rank:1},settings:clone(state.settings),candidate_member_ids:[],candidate_snap_ids:[]}),
   storage: profileStore,
 };''')
     app = replace_once(app, 'const saved = localStorage.getItem(STORE);', 'const saved = profileStore.load();')
-    app = replace_once(app, 'function replaceState(x) { if (jobId) return;', 'function replaceState(x) { if (jobId || profileStore.outOfDate) return;')
+    app = replace_once(app, ' if (jobId) return; state = normalizeImport', ' if (jobId || profileStore.outOfDate) return; state = normalizeImport')
     app = replace_once(app, '$("inputArea").disabled = on;', '$("inputArea").disabled = on || profileStore.outOfDate;')
     app = replace_once(app, '$(id).disabled = on);', '$(id).disabled = on || profileStore.outOfDate);')
     app = replace_once(app, 'if (jobId || startingJob || updatingSoftware) return;', 'if (jobId || startingJob || updatingSoftware || profileStore.outOfDate) return;')
