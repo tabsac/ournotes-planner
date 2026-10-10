@@ -9,7 +9,10 @@ class Worker {
  postMessage({id}){queueMicrotask(()=>{const data=failures-->0?{id,error:'RangeError: Array buffer allocation failed'}:{id,value:{ok:true,result:{}}};for(const fn of [...(this.listeners.message||[])])fn({data});});}
  terminate(){this.terminated=true;}
 }
-const py={FS:{analyzePath:()=>({exists:true})},globals:{set(){}},runPython(code){
+const py={FS:{analyzePath:()=>({exists:true})},globals:{set(){}},async runPythonAsync(){
+ await context.self.browser_native_async('{}');
+ return JSON.stringify({status:'complete',result:{sections:[{goal:'daily'}]}});
+},runPython(code){
  if(code.includes("'deck_local' in sys.modules"))return true;
  if(code.includes('browser_runtime.invoke')){if(!phase++){throw Error('NeedNative');}return JSON.stringify({status:'complete',result:{sections:[{goal:'daily'}]}});}
  if(code.includes('pending_native,ensure_ascii'))return JSON.stringify({key:'request',raw:'{}'});

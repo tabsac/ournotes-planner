@@ -174,7 +174,7 @@ def invoke(method, raw, job_id=None):
                           ensure_ascii=False)
     if method == "deck-batch":
         import deck_local
-        return json.dumps(deck_local.invoke(body,job_id),ensure_ascii=False,allow_nan=False)
+        raise p.InputError("组卡需要异步浏览器传输，请更新页面。")
     if method != "optimize":
         raise p.InputError("找不到此操作。")
     begin = time.monotonic()

@@ -273,7 +273,7 @@ def main():
                 target = PUBLIC / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(archive.read(info))
-        for name in ("browser_runtime.py", "cp_model.py", "account_import.py", "account_scores.py", "team_options.py", "activity_goals.py", "deck_local.py"):
+        for name in ("browser_runtime.py", "cp_model.py", "account_import.py", "account_scores.py", "team_options.py", "activity_goals.py", "deck_local.py", "deck_fast.py"):
             add_runtime(runtime, name, (HERE / name).read_bytes())
             included.append(name)
         # 覆盖层里**新增**的文件（上游 zip 里本来没有的）。

@@ -23,6 +23,7 @@ async function withMemoryRetry(solve, raw) {
  }
 }
 
+self.browser_native_async = async raw => JSON.stringify(await withMemoryRetry(nativeSolve,String(raw)));
 self.browser_cancelled = () => cancel ? Atomics.load(cancel, 0) !== 0 : cancelRequested;
 self.browser_progress = raw => {
   lastProgress = JSON.parse(raw);
@@ -193,6 +194,11 @@ self.onmessage = async event => {
     pyodide.globals.set('_browser_method', message.method);
     pyodide.globals.set('_browser_body', JSON.stringify(message.body || {}));
     pyodide.globals.set('_browser_job_id', message.jobId || null);
+    if(message.method==='deck-batch') {
+      const raw=await pyodide.runPythonAsync('import deck_local,json; json.dumps(await deck_local.invoke_async(json.loads(_browser_body),_browser_job_id),ensure_ascii=False)');
+      const value=JSON.parse(raw);if(memoryFailure(value.error))value.error='浏览器可用计算内存不足；请关闭其他组卡页面后重试。';self.postMessage({type:'reply',id:message.id,value});
+      return;
+    }
     // 外层驱动循环：Python 抛「需要求解」就 await 解掉、写缓存、重跑一次。
     let raw;
     for (let round = 0; ; round++) {
