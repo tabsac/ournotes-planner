@@ -81,6 +81,22 @@ async function start() {
   const pending = new Map();
   let sequence = 0, job = null, solver = null, bridge = null, sharedCancel = null;
   let persisted = Promise.resolve(), releaseLock = null;
+  let newestPersist = null, persisting = false;
+  function queuePersist(bytes) {
+    // Only the newest pending checkpoint is needed. Slow IndexedDB writes must
+    // not retain an unbounded queue of complete SQLite ArrayBuffers.
+    newestPersist = bytes;
+    if (persisting) return;
+    persisting = true;
+    persisted = (async () => {
+      try {
+        while (newestPersist) {
+          const current = newestPersist; newestPersist = null;
+          try {await writeCache(current);} catch(error) {storageError(error);}
+        }
+      } finally {persisting = false;}
+    })();
+  }
   let workerFailure = null;
   function failBridge(error) {
     if (!bridge) return;
@@ -115,7 +131,7 @@ async function start() {
   worker.onmessage = ({data}) => {
     if (data.type === 'loading') {showLoading(data.text); return;}
     if (data.type === 'persist') {
-      persisted = persisted.then(() => writeCache(data.bytes)).catch(storageError);
+      queuePersist(data.bytes);
       return;
     }
     if (data.type === 'progress') {

@@ -6,11 +6,22 @@ let ready,localBaseURL,nativeWorker,nativeSeq=0;
 const nativeCache=new Map();
 self.browser_native_cached=key=>nativeCache.has(key)?JSON.stringify(nativeCache.get(key)):null;
 async function nativeSolve(raw){
+ solverWorker?.terminate();solverWorker=null;
  if(!nativeWorker)nativeWorker=new Worker(new URL('./deck-native-worker.js',import.meta.url),{type:'module'});
  const w=nativeWorker,id=++nativeSeq;
  return new Promise((resolve,reject)=>{const finish=(v,e)=>{w.removeEventListener('message',message);w.removeEventListener('error',error);abortNative=null;e?reject(e):resolve(v);};const message=ev=>{if(ev.data.id===id)finish(ev.data.value,ev.data.error?Error(ev.data.error):null);};const error=e=>finish(null,Error(e.message));abortNative=()=>finish(null,Error('已取消'));w.addEventListener('message',message);w.addEventListener('error',error);w.postMessage({id,raw,baseURL:localBaseURL});});
 }
 let abortNative;
+const memoryFailure = error => /array buffer allocation|out of memory|cannot enlarge memory|memory allocation/i.test(String(error?.message || error));
+async function withMemoryRetry(solve, raw) {
+ try {return await solve(raw);} catch (error) {
+  if (!memoryFailure(error) || self.browser_cancelled()) throw error;
+  nativeWorker?.terminate();nativeWorker=null;
+  solverWorker?.terminate();solverWorker=null;
+  self.postMessage({type:'progress',changes:{stage:'正在释放计算内存并重试当前步骤…'}});
+  return solve(raw);
+ }
+}
 
 self.browser_cancelled = () => cancel ? Atomics.load(cancel, 0) !== 0 : cancelRequested;
 self.browser_progress = raw => {
@@ -44,12 +55,15 @@ function getSolverWorker() {
 }
 
 function solveAsync(raw) {
+    nativeWorker?.terminate();nativeWorker=null;
     const worker = getSolverWorker(), id = ++solveSeq;
     return new Promise((resolve, reject) => {
         const finish = (value, failure) => {
             worker.removeEventListener('message', onMessage);
             worker.removeEventListener('error', onError);
             abortSolve = null;
+            worker.terminate();
+            if (solverWorker === worker) solverWorker = null;
             failure ? reject(failure) : resolve(value);
         };
         const onMessage = event => {
@@ -174,6 +188,7 @@ self.onmessage = async event => {
     cancel = message.cancel ? new Int32Array(message.cancel) : null;
     if(message.method==='deck-batch'&&pyodide.runPython("'deck_local' in sys.modules"))pyodide.runPython('import deck_local; deck_local.partial=None');
     if (['optimize','deck-batch'].includes(message.method)) {started = performance.now(); lastProgress = {};}
+    if (['optimize','deck-batch'].includes(message.method)) {solveCache.clear();nativeCache.clear();}
     if(message.method==='deck-batch'&&!pyodide.FS.analyzePath('/planner/deck-data.json').exists){const info=await (await fetch(new URL('build-info.json',localBaseURL),{cache:'no-cache'})).json();const r=await fetch(new URL('deck-local/'+info.local_deck_engine+'/deck-data.json',localBaseURL));if(!r.ok)throw Error('本地组卡资料加载失败');pyodide.FS.writeFile('/planner/deck-data.json',new Uint8Array(await r.arrayBuffer()));}
     pyodide.globals.set('_browser_method', message.method);
     pyodide.globals.set('_browser_body', JSON.stringify(message.body || {}));
@@ -187,22 +202,36 @@ self.onmessage = async event => {
         } catch (error) {
             if(message.method==='deck-batch'){
              const text=String(pyodide.runPython("import deck_local,json; json.dumps(deck_local.pending_native,ensure_ascii=False)"));const n=JSON.parse(text);
-             if(n.key){pyodide.runPython('deck_local.pending_native.clear()');if(cancelRequested)throw Error('已取消');const value=await nativeSolve(n.raw);if(!cancelRequested)nativeCache.set(n.key,value);continue;}
+             if(n.key){pyodide.runPython('deck_local.pending_native.clear()');if(cancelRequested)throw Error('已取消');const value=await withMemoryRetry(nativeSolve,n.raw);if(!cancelRequested)nativeCache.set(n.key,value);continue;}
             }
             const pending = takePendingSolve();
             if (!pending) throw error;          // 不是 NeedSolve，原样抛出
             if (round >= 20000) throw new Error('求解驱动未收敛（超过 80 轮）：' + error.message);
             self.postMessage({type: 'progress', changes: {stage: '精确求解中…', solver_round: round + 1}});
-            const value = await solveAsync(pending.raw);
+            const value = await withMemoryRetry(async raw => {
+              const answer = await solveAsync(raw);
+              if (answer?.error) throw new Error(answer.error);
+              return answer;
+            }, pending.raw);
             if (value && value.error) throw new Error(value.error);
             // 取消结果不进缓存：否则以后正常的那次运行会命中「已取消」。
             if (value && value.cancelled) { solveCache.delete(pending.key); continue; }
             solveCache.set(pending.key, value);
         }
     }
-    self.postMessage({type: 'reply', id: message.id, value: JSON.parse(raw)});
+    const value = JSON.parse(raw);
+    if (memoryFailure(value.error)) value.error = '浏览器可用计算内存不足；请关闭其他组卡页面，减少一次计算的目标后重试。';
+    self.postMessage({type: 'reply', id: message.id, value});
   } catch (error) {
-    if(message.method==='deck-batch'&&self.browser_cancelled()){let result=null;try{result=JSON.parse(String(pyodide.runPython('import deck_local,json; json.dumps(deck_local.partial,ensure_ascii=False)')));}catch{}self.postMessage({type:'reply',id:message.id,value:{status:'cancelled',result}});}else self.postMessage({type: 'reply', id: message.id, error: error.message});
+    const text=memoryFailure(error)?'浏览器可用计算内存不足；请关闭其他组卡页面，减少一次计算的目标后重试。':error.message;
+    if(message.method==='deck-batch'){let result=null;try{result=JSON.parse(String(pyodide.runPython('import deck_local,json; json.dumps(deck_local.partial,ensure_ascii=False)')));}catch{}self.postMessage({type:'reply',id:message.id,value:{status:self.browser_cancelled()?'cancelled':'failed',error:text,result}});}else self.postMessage({type: 'reply', id: message.id, error:text});
+  } finally {
+    if (['optimize','deck-batch'].includes(message.method)) {
+      solverWorker?.terminate();solverWorker=null;
+      nativeWorker?.terminate();nativeWorker=null;
+      solveCache.clear();nativeCache.clear();
+      try {pyodide.runPython('import gc; gc.collect()');} catch {}
+    }
   }
 };
 

@@ -113,6 +113,9 @@ def patch_runtime_source(relative, raw):
     # （Windows 上 write_text 默认写 CRLF，正好会被这一步"吃掉"，所以症状是校验不过。）
     text = raw.decode("utf-8").replace("\r\n", "\n")
     if relative == "planner_core.py":
+        # AP signatures retain up to 120 per-note order matrices each.
+        # A smaller cache changes recomputation, never scores or search scope.
+        text = replace_once(text, 'if len(self.cache) >= 512:', 'if len(self.cache) >= 16:')
         text = text.replace('self.event = read_json(self.snapshot / "normalized/event_1.json")', 'self.event = read_json(self.snapshot / "normalized/current_event.json")')
         text = text.replace('_eventId=1, _liveMusicId=sid', '_eventId=self.data.event["event_id"], _liveMusicId=sid')
         text = text.replace('r["_eventId"] == 1 and', 'r["_eventId"] == data.event["event_id"] and')
