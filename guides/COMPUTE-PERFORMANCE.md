@@ -11,3 +11,12 @@
 真实账号包仅在本地用于性能与公式对照，不包含在仓库或网页产物。测试应使用完整卡库、全部非指定歌曲目标以及同时勾选 Skip / 非 Skip，不能用少量卡牌的耗时代表实际卡库。
 
 验证：`node tools/test_compute_workers.cjs` 检查异步调用分配失败后的单次重试、组件回收和部分结果保留；`python -B tools/validate_snapshot_release.py` 与交付护栏检查数据和产物一致性。
+
+
+桌面组卡条件在左侧，计算状态、结果和历史记录在右侧；窄屏按上下排列。完成或恢复结果时滚动至结果栏。
+
+云端组卡批次（kind=deck-batch、schema_version=1、sections 数组、display 对象）单条上限为 2 MiB，前端检查与 API 创建/更新一致，代理请求上限为 3 MiB。其他记录沿用 256 KiB。保留全部计算结果，不截断行数；本机结果可直接重试同步，无需重算。
+
+后端容量升级工具：`python tools/upgrade_deck_result_capacity.py --source <现有API文件> --output <候选API文件>`。工具只修改批次创建/更新的容量规则，可重复执行；保留原认证、账号归属、敏感字段清除和版本冲突处理。部署应先备份、校验语法，确认没有正在运行的云端任务，并同步代理请求体上限。
+
+验证：`node tools/test_deck_result_capacity.cjs`；`python tools/test_deck_result_capacity.py <候选API文件>`。后者只使用隔离临时数据库和合成数据，覆盖 700 KiB 创建/读回、950 KiB 更新、超限拒绝后原记录不变、账号隔离及敏感字段清除。

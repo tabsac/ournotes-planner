@@ -27,6 +27,10 @@ const PROFILE_RESULT_KEY = "ournotes-cloud-profile";  // 卡库关联的那条�
 export const OFFICIAL_SITE = "https://on.tabsac.com/";
 
 export const MAX_PAYLOAD_BYTES = 256 * 1024;
+export const MAX_DECK_PAYLOAD_BYTES = 2 * 1024 * 1024;
+export function payloadLimit(value) {
+    return value?.kind === 'deck-batch' && value.schema_version === 1 && Array.isArray(value.sections) && value.display && typeof value.display === 'object' && !Array.isArray(value.display) ? MAX_DECK_PAYLOAD_BYTES : MAX_PAYLOAD_BYTES;
+}
 export const MAX_RESULTS = 200;
 export const USERNAME_RE = /^[A-Za-z0-9_.\-]{3,24}$/;
 export const MIN_PASSWORD = 8;
@@ -372,8 +376,9 @@ export function payloadBytes(payload) {
 export function preparePayload(value) {
     const {payload, removed} = sanitizePayload(value);
     const bytes = payloadBytes(payload);
-    if (bytes > MAX_PAYLOAD_BYTES) {
-        throw new CloudError("too_large", `这条结果 ${Math.round(bytes / 1024)} KB，超过 256 KB 上限`);
+    const limit = payloadLimit(payload);
+    if (bytes > limit) {
+        throw new CloudError("too_large", `这条结果 ${Math.round(bytes / 1024)} KB，超过 ${limit / 1024} KB 上限`);
     }
     const notice = removed.length ? `已自动移除 ${removed.length} 项敏感字段（${removed.slice(0, 3).join("、")}…）` : "";
     return {payload, removed, bytes, notice};
