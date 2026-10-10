@@ -666,6 +666,7 @@ window.PlannerAccount = {
     app = replace_once(app, "const s=state.settings;s.goal??='event_pt';s.reward_stage??='normal';", "const s=state.settings;s.goal??='event_pt';s.reward_stage??='normal';s.boost_per_live??=4;s.challenge_cp??=200;")
     app = replace_once(app, "(budget?'计算预算内总收益':'推荐'+esc(activityGoalLabels[s.goal])+'队伍')", "(budget?'计算预算内总收益':'开始组卡')")
     app = replace_once(app, '队长限制（普通与挑战）', '固定队长（可选）')
+    app = app.replace('options([1,2,3,4,5,6,7,8,9,10],s.boost_per_live', 'options([0,1,2,3],s.boost_per_live').replace('s.boost_per_live??=4;', 's.boost_per_live??=3;if(![0,1,2,3].includes(s.boost_per_live))s.boost_per_live=3;')
     (HERE / "generated-app.js").write_text(app, "utf-8")
     report = {"activity_model": semantic.hexdigest(), "browser_version": VERSION, "core_version": core_version,
               "public_source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),

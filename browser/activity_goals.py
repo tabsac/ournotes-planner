@@ -5,9 +5,11 @@ GOALS={'challenge_score':('挑战曲冲榜','分'),'challenge_skip':('挑战 Ski
 
 def prepare(request):
  r=copy.deepcopy(request);s=r['settings'];goal=s.get('goal','budget')
- if goal=='budget':return r
+ if goal=='budget':
+  if s.get('boost_per_live',3) not in (1,2,3):raise ValueError('预算计算仅支持 1、2、3 Boost；0 Boost 请使用无需预算的单局组卡。')
+  return r
  if goal not in GOALS:raise ValueError('请选择有效的组卡目标。')
- if s.get('boost_per_live') is None:s['boost_per_live']=4
+ if s.get('boost_per_live') is None:s['boost_per_live']=3
  if s.get('challenge_cp') is None:s['challenge_cp']=200
  mode='challenge' if goal.startswith('challenge_') else ('normal' if goal=='cp' else s.get('reward_stage','normal'))
  if mode not in ('normal','challenge'):raise ValueError('演出类型无效。')
@@ -22,7 +24,14 @@ def score_row(p,data,row,goal,mode,consumed,reward_cache=None):
  def reward(rank):
   k=(mode,consumed,rank,row['bonuses_10000']['event_pt'],row['bonuses_10000']['shop_pt'])
   if reward_cache is not None and k in reward_cache:return reward_cache[k]
-  value=preview(data.snapshot,rank,consumed,k[3],k[4],event_id=data.event['event_id'])['gained']
+  if mode=='normal' and consumed==0:
+   # The client simulator defines zero Boost as the unboosted 1x rates.
+   # Apply the original signed integer rounding to bases, not boosted totals.
+   event,_=p.rw._event(data.snapshot,data.event['event_id']);base=next(v for v in event['ordinary_base_rewards'] if v['rank']==rank)
+   rewards=base['shop_reward_rows']
+   if any(v['_probability']!=10000 for v in rewards):raise ValueError('随机徽章奖励尚未接入。')
+   value={'cp':base['cp_base'],'event_pt':p.rw._amount([10000+k[3],1,base['event_pt_base']]),'shop_pt':sum(p.rw._amount([v['_resourceCount'],10000+k[4],1]) for v in rewards)}
+  else:value=preview(data.snapshot,rank,consumed,k[3],k[4],event_id=data.event['event_id'])['gained']
   if reward_cache is not None:
    if len(reward_cache)>10000:reward_cache.clear()
    reward_cache[k]=value
@@ -44,8 +53,8 @@ def row_key(row):
 def optimize(request,p,data,progress=lambda **k:None,cancelled=lambda:False,cache=None,run_id=None):
  begin=time.monotonic();request=prepare(request);s=request['settings'];goal=s['goal']
  mode='challenge' if goal.startswith('challenge_') else ('normal' if goal=='cp' else s.get('reward_stage','normal'))
- consumed=p.integer(s.get('challenge_cp',200) if mode=='challenge' else s.get('boost_per_live',4),'单局消耗',1)
- if (mode=='challenge' and consumed not in (200,400,800,1600)) or (mode=='normal' and consumed>10):raise p.InputError('请选择有效的单局消耗档位。')
+ consumed=p.integer(s.get('challenge_cp',200) if mode=='challenge' else s.get('boost_per_live',3),'单局消耗',1 if mode=='challenge' else 0)
+ if (mode=='challenge' and consumed not in (200,400,800,1600)) or (mode=='normal' and consumed not in (0,1,2,3)):raise p.InputError('请选择有效的单局消耗档位。')
  profile=request['profile'];mids=p._select_ids(request,profile,'candidate_member_ids','members');sids=p._select_ids(request,profile,'candidate_snap_ids','snaps')
  issues=p.growth_issues(request,data)
  if not issues['complete']:raise p.InputError('请先补齐本次候选卡所需养成。')

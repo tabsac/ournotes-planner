@@ -1,1 +1,1 @@
-export const ACTIVITY_MODEL = "dfb599b8a58f489f02d96d5d50f90ed03c7f12bf69d4f0051bf521b7a02652a7";
+export const ACTIVITY_MODEL = "c89bacdaccbfc2cd466b5b1e831eabede6320636e30eff9a1096c83a1de80e17";

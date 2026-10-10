@@ -5,7 +5,7 @@ from js import browser_cancelled,browser_native_cached,browser_progress,browser_
 import browser_runtime as br
 p=br.p
 ROOT=Path('/planner')
-LABELS={'daily': '自由组卡', 'song': '歌曲组卡', 'leaderboard': '歌榜组卡', 'activity': '活动收益', 'fire': '日常 / 清火组卡', 'gekiso': '激奏组卡'}
+LABELS={'daily': '自由组卡', 'song': '歌曲组卡', 'challenge': '挑战演出', 'leaderboard': '活动歌榜', 'activity': '活动收益', 'fire': '日常 / 清火组卡', 'gekiso': '激奏组卡'}
 def digest(v):return hashlib.sha256(json.dumps(v,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
 _data=None
 def data():
@@ -49,11 +49,14 @@ def validate(doc,raw):
   r['profile'][key]=[{k:v.get(k) for k in fields} for v in values if isinstance(v,dict)]
  for key in ('character_total_rank','tgw_card_rank'):r['profile'][key]=profile.get(key)
  if not isinstance(raw,dict):raise ValueError('计算条件格式无效。')
- opts={'goals':raw.get('goals',['daily']),'methods':raw.get('methods',['ap']),'maxLevel':raw.get('maxLevel',99),'song':str(raw.get('song') or '').strip()[:80],'boost':raw.get('boost',4),'searchSeconds':raw.get('searchSeconds',3),'searchMode':raw.get('searchMode','fast'),'candidateBudget':8 if raw.get('searchMode','fast')=='fast' else 32}
- if not isinstance(opts['goals'],list) or not opts['goals'] or len(opts['goals'])>6 or any(g not in LABELS for g in opts['goals']):raise ValueError('组卡目标无效。')
+ opts={'goals':raw.get('goals',['daily']),'methods':raw.get('methods',['ap']),'maxLevel':raw.get('maxLevel',99),'song':str(raw.get('song') or '').strip()[:80],'boost':raw.get('boost',3),'searchSeconds':raw.get('searchSeconds',3),'searchMode':raw.get('searchMode','fast'),'challengeCp':raw.get('challengeCp',200),'growthMode':raw.get('growthMode','current-max'),'candidateBudget':8 if raw.get('searchMode','fast')=='fast' else 32}
+ if not isinstance(opts['goals'],list) or not opts['goals'] or len(opts['goals'])>7 or any(g not in LABELS for g in opts['goals']):raise ValueError('组卡目标无效。')
  if not isinstance(opts['methods'],list) or not opts['methods'] or any(m not in ('ap','skip') for m in opts['methods']):raise ValueError('演出方式无效。')
- for key,lo,hi in [('maxLevel',1,99),('boost',1,10),('searchSeconds',1,30)]:
+ for key,lo,hi in [('maxLevel',1,99),('boost',0,3),('searchSeconds',1,30)]:
   if type(opts[key])!=int or not lo<=opts[key]<=hi:raise ValueError('计算条件无效：'+key)
+ if opts['challengeCp'] not in (200,400,800,1600):raise ValueError('挑战消耗 CP 档位无效。')
+ if opts['growthMode'] not in ('current-max','full-training'):raise ValueError('养成假设无效。')
+ apply_growth(r,d,opts['growthMode'])
  if opts['searchMode'] not in ('fast','thorough'):raise ValueError('搜索方式无效。')
  opts['goals']=sorted(set(opts['goals']));opts['methods']=sorted(set(opts['methods']))
  if 'song' in opts['goals'] and not opts['song']:raise ValueError('请填写歌曲名称。')
@@ -66,6 +69,22 @@ def validate(doc,raw):
   selected=set(r['candidate_member_ids'])
   if any(type(x.get('gekisou_skill_level'))!=int or not 1<=x['gekisou_skill_level']<=5 for x in r['profile']['inventory']['members'] if x['id'] in selected):raise ValueError('请补齐候选成员的激奏技能等级。')
  return r,opts
+
+def apply_growth(doc,d,mode):
+ # Work on the validated copy; never alter the imported account inventory.
+ for kind,table in [('members','MasterMemberCard'),('snaps','MasterSupportCard')]:
+  for row in doc['profile']['inventory'][kind]:
+   card=d.index[table].get(row['id'])
+   if card is None:continue
+   field='training_count' if kind=='members' else 'limit_break_count'
+   stage=row.get(field)
+   if kind=='members' and mode=='full-training':
+    caps=[v for v in d.tables['MasterMemberCardLevelLimit'] if v['_rarity']==card['_rarity']]
+    stage=max(v['_awakeCount'] for v in caps)-1;row[field]=stage
+   if type(stage)!=int or not 0<=stage<=4:continue
+   caps=([v['_limitLevel'] for v in d.tables['MasterMemberCardLevelLimit'] if v['_rarity']==card['_rarity'] and v['_awakeCount']==stage+1] if kind=='members' else [v['_limitLevel'] for v in d.tables['MasterSupportCardRank'] if v['_group']==card['_supportCardRankGroup'] and v['_rank']==stage+1])
+   if len(caps)!=1:raise ValueError('卡牌等级上限数据不完整。')
+   row['level']=caps[0]
 
 def roster(doc):
  p=doc['profile'];m=p['inventory']['members'];s=p['inventory']['snaps']
@@ -128,13 +147,16 @@ async def run(ident,body,event):
   result['display']={k:cat[k] for k in ('members','snaps','songs')};result['profile']=doc['profile']
   for goal in opts['goals']:
    if event.is_set():raise InterruptedError('已取消')
-   if goal in ('activity','fire'):
+   if goal in ('activity','fire','challenge'):
     import deck_fast
     choices=specs_for(cat,n,opts,'activity')
-    if 'reward_entries' not in locals():
-     reward_entries=await deck_fast.rewards(engine,doc,opts,choices,p,d,lambda **v:update(ident,progress=v,result=result),event.is_set)
-    entries=copy.deepcopy(reward_entries)
-    result['sections'].append({'goal':goal,'label':LABELS[goal],'entries':entries,'notes':['原生限时搜索，未证明最优时展示当前推荐。','CP、PT、徽章共享评分；徽章在候选队伍中按实际评级重新计算。','快速模式逐曲搜索最高可用难度的候选，再在全部难度复算；不保证全局最优。' if opts['searchMode']=='fast' else '深入模式逐谱面分别搜索。']})
+    if 'challenge_entries' not in locals():
+     challenge_entries=await deck_fast.rewards(engine,doc,opts,choices,p,d,lambda **v:update(ident,progress=v,result=result),event.is_set,mode='challenge')
+    if goal=='challenge':entries=copy.deepcopy(challenge_entries)
+    else:
+     if 'reward_entries' not in locals():reward_entries=await deck_fast.rewards(engine,doc,opts,choices,p,d,lambda **v:update(ident,progress=v,result=result),event.is_set,exchange=challenge_entries)
+     entries=deck_fast.with_challenge_exchange(reward_entries,challenge_entries,opts)
+    result['sections'].append({'goal':goal,'label':LABELS[goal],'entries':entries,'notes':['普通演出获取 CP；挑战演出消耗 CP，获得活动 PT 与徽章。','活动收益包含普通演出直接收益及所获 CP 的挑战兑换收益；按长期平均折算，零散 CP 可累计，不代表每局都能立即挑战。' if goal!='challenge' else '按活动挑战歌曲比较 PT 与徽章；消耗 '+str(opts['challengeCp'])+' CP。','限时搜索在候选范围中推荐，未证明全局最优。']})
    elif goal=='leaderboard':
     choices=specs_for(cat,n,opts,'activity');table=n['master']['MasterChallengeMusic'];allowed={v['_liveMusicId']:v['_id'] for v in (dict(zip(table['columns'],x)) for x in table['rows']) if v['_eventId']==d.event['event_id']};choices=[x for x in choices if x['song_id'] in allowed]
     entries=[]
@@ -142,10 +164,20 @@ async def run(ident,body,event):
      rows=[]
      for index,spec in enumerate(choices):
       q=request(spec,method,opts['searchSeconds'],doc['settings'].get('fixed_leader_id'));q['scenario']={'kind':'challenge','musicId':allowed[spec['song_id']]};q['context']={'powerSnapshot':{'eventIds':[d.event['event_id']],'capturedJstTicks':None},'resultClock':None,'eventPayoff':None}
-      out=await search(engine,owned,q,opts);rows.extend(row(v,spec,method,out['optimality']) for v in out['results']);update(ident,progress={'goal':LABELS[goal],'method':method,'completed_sheets':index+1,'total_sheets':len(choices)},result=result)
+      out=await search(engine,owned,q,opts)
+      for v in out['results']:
+       candidate=row(v,spec,method,'unproven');maximum=(v.get('scoreSummary') or {}).get('maximum');interval=v.get('scoreInterval') or {}
+       if maximum is None:maximum=number(interval.get('upper'))
+       if maximum is not None:candidate['score']=maximum
+       rows.append(candidate)
+      update(ident,progress={'goal':LABELS[goal],'method':method,'completed_sheets':index+1,'total_sheets':len(choices)},result=result)
+     best={}
+     for v in rows:
+      if v['song_id'] not in best or v['score']>best[v['song_id']]['score']:best[v['song_id']]=v
+     rows=list(best.values())
      for v in rows:v['target_value']=v['score']
      entries.append({'metric':'challenge_skip' if method=='skip' else 'challenge_score','method':method,'rows':sorted(rows,key=lambda v:v['score'],reverse=True),'label':'活动歌榜','unit':'分','proven':all(v['proven'] for v in rows)})
-    result['sections'].append({'goal':goal,'label':LABELS[goal],'entries':entries,'notes':['每首活动歌曲按指定最高难度分别搜索，限时结果不宣称最优。']})
+    result['sections'].append({'goal':goal,'label':LABELS[goal],'entries':entries,'notes':['每首活动歌曲仅保留各难度与候选队伍中的最高可达分；达到该分数需要对应技能顺序／随机结果，限时搜索不宣称全局最优。']})
    else:
     choices=specs_for(cat,n,opts,goal)
     for method in opts['methods']:
