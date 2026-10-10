@@ -145,7 +145,7 @@ export async function checkRemoteData({force = false} = {}) {
         return state;
     }
     try {
-        const bundled = await fetch(BUNDLED_URL).then(r => (r.ok ? r.json() : null)).catch(() => null);
+        const bundled = await fetch(BUNDLED_URL, {cache: "no-store"}).then(r => (r.ok ? r.json() : null)).catch(() => null);
         state.bundled = bundled;
         const version = await fetchJsonWithBytes(dataUrl(VERSION_PATH));
         state.version = version.json;
@@ -154,7 +154,7 @@ export async function checkRemoteData({force = false} = {}) {
         state.contentChanged = contentChanged;
 
         // 内容没变、也不强制 → 直接用上次的比对结果，不再拉 57 KB
-        if (!force && !contentChanged && cached?.songs) {
+        if (!force && !contentChanged && cached?.songs && cached.bundledKey === JSON.stringify(bundled)) {
             state.available = true;
             state.reason = "ok";
             state.integrity = cached.integrity;
@@ -196,7 +196,7 @@ export async function checkRemoteData({force = false} = {}) {
         state.available = true;
         state.reason = "ok";
         state.checkedAt = Date.now();
-        writeCache({contentDigests: version.json.contentDigests, songs: state.songs,
+        writeCache({bundledKey: JSON.stringify(bundled), contentDigests: version.json.contentDigests, songs: state.songs,
                     event: state.event, integrity, at: state.checkedAt});
     } catch (error) {
         state.available = false;
@@ -229,8 +229,7 @@ export function dataNotice() {
     }
     if (!parts.length) return null;
     return parts.join("；")
-        + "。本页的计算仍使用内置快照（" + (state.bundled?.snapshot || "?") + "），"
-        + "新曲 / 新活动要等网页更新后才能参与计算。";
+        + "。服务器会自动更新游戏数据，页面会自动检查新版，并在当前操作结束后更新。";
 }
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>

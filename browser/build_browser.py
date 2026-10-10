@@ -424,7 +424,7 @@ def main():
     html = re.sub(r'<h1>.*?</h1>', '<h1>Our Notes planner<span class="star">✦</span></h1>', html, count=1)
     html = html.replace(' <nav class="tabs"', ' <button id="siteMenuToggle" class="site-menu-toggle" aria-label="展开功能菜单" aria-expanded="false" aria-controls="siteMenu"><span class="site-menu-lines"><i></i><i></i><i></i></span></button><nav id="siteMenu" hidden class="tabs"')
     html = html.replace('aria-label="功能页">', 'aria-label="功能页"><button data-tab="home">主页</button>')
-    html = html.replace('data-tab="cloud">账号', 'data-tab="cloud">登录与 QQ 关联')
+    html = re.sub(r'<button[^>]*data-tab="cloud"[^>]*>.*?</button>', '', html)
     html = html.replace(' <section id="cloud" class="tab-page" hidden><div id="cloudRoot"></div></section>', ' <section id="home" class="tab-page" hidden><div class="panel"><div class="section-kicker">账号中心</div><h2>我的 Our Notes</h2><p class="muted">登录网页账号，关联 QQ，并管理已上传的游戏账号。</p></div><div id="cloudRoot"></div><div class="panel" id="gameAccountsRoot"></div></section>')
     html = html.replace('新建个人卡库', '重置当前卡库')
     # Retire the historical verification page; keep live data checks in software.

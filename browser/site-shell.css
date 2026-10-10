@@ -10,3 +10,6 @@
 @media(prefers-reduced-motion:reduce){.site-menu-lines{transition:none}}
 
 .site-menu-toggle{touch-action:none;user-select:none;cursor:grab}.site-menu-toggle:active{cursor:grabbing}.game-delete-actions{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:24px}.game-delete-actions button{width:100%;min-height:44px;border-radius:10px}
+
+#siteMenu[data-docked]:not([data-docked=""]){width:min(300px,calc(100vw - 64px));height:100dvh;max-height:100dvh;box-sizing:border-box;border-radius:0;padding:76px 18px 24px}
+.site-menu-toggle[data-docked=left]{border-radius:0 50% 50% 0}.site-menu-toggle[data-docked=right]{border-radius:50% 0 0 50%}.site-menu-toggle[data-docked=top]{border-radius:0 0 50% 50%}.site-menu-toggle[data-docked=bottom]{border-radius:50% 50% 0 0}

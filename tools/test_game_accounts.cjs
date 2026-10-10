@@ -29,13 +29,19 @@ const server=http.createServer(async(req,res)=>{
  try {
  await page.goto('http://127.0.0.1:'+server.address().port);await page.waitForFunction(()=>window.ready);
  assert.equal(await page.locator('[data-select]').count(),0);
- await page.locator('#siteMenuToggle').click();assert.equal(await page.locator('#siteMenu').isVisible(),true);await page.waitForTimeout(250);assert.equal(await page.locator('.site-menu-lines').evaluate(el=>getComputedStyle(el).transform),'matrix(0, 1, -1, 0, 0, 0)');await page.keyboard.press('Escape');assert.equal(await page.locator('#siteMenu').isVisible(),false);
+ await page.locator('#siteMenuToggle').click();assert.equal(await page.locator('#siteMenu').isVisible(),true);await page.waitForTimeout(250);assert.equal(await page.locator('.site-menu-lines').evaluate(el=>getComputedStyle(el).transform),'matrix(0, 1, -1, 0, 0, 0)');await page.keyboard.press('Escape');await page.locator('#siteMenu').waitFor({state:'hidden'});assert.equal(await page.locator('#siteMenu').isVisible(),false);
  const ball=await page.locator('#siteMenuToggle').boundingBox();
  await page.mouse.move(ball.x+26,ball.y+26);await page.mouse.down();await page.mouse.move(300,110,{steps:8});await page.mouse.up();
  assert.equal(await page.locator('#siteMenu').isVisible(),false,'drag must not open menu');
  const moved=await page.locator('#siteMenuToggle').boundingBox();assert(moved.y<200&&moved.x>200);
  await page.locator('#siteMenuToggle').click();const menuBox=await page.locator('#siteMenu').boundingBox();assert(menuBox.x>=0&&menuBox.x+menuBox.width<=390);
  assert.equal(await page.locator('#siteMenu').evaluate(e=>e.getAnimations().length),1,'opening should animate');await page.keyboard.press('Escape');
+ await page.locator('#siteMenu').waitFor({state:'hidden'});
+ const free=await page.locator('#siteMenuToggle').boundingBox();await page.mouse.move(free.x+26,free.y+26);await page.mouse.down();await page.mouse.move(389,220,{steps:8});await page.mouse.up();
+ assert.equal(await page.locator('#siteMenuToggle').getAttribute('data-docked'),'right');await page.waitForTimeout(400);
+ await page.locator('#siteMenuToggle').click();await page.waitForTimeout(260);const drawer=await page.locator('#siteMenu').boundingBox();assert(drawer.x+drawer.width===390&&drawer.height===844,'docked menu is a full-height sidebar');
+ await page.keyboard.press('Escape');assert.equal(await page.locator('#siteMenu').evaluate(e=>e.getAnimations().length),1,'closing animates');await page.locator('#siteMenu').waitFor({state:'hidden'});
+ await page.locator('#siteMenuToggle').click();await page.keyboard.press('Escape');await page.locator('#siteMenuToggle').click();await page.waitForTimeout(300);assert.equal(await page.locator('#siteMenu').isVisible(),true,'interrupted close cannot hide reopened menu');await page.keyboard.press('Escape');await page.locator('#siteMenu').waitFor({state:'hidden'});
  const u='744532239894985508',v='744532239894985509';
  await page.evaluate(uid=>window.PlannerGameAccounts.importPackage(window.test.doc(uid,'First')),u);
  await page.evaluate(()=>window.test.saveRecord({accountId:window.PlannerGameAccounts.uid,entries:[{song_id:1}]}));

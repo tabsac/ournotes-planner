@@ -274,12 +274,14 @@ async function start() {
   const cloudBadge = document.getElementById('cloudBadge');
   if (cloudBadge) {
     cloudBadge.addEventListener('click', () => {
-      document.querySelector('.tabs button[data-tab="cloud"]')?.click();
+      document.querySelector('.tabs button[data-tab="home"]')?.click();
     });
   }
 
   // ---- 远端只读数据（/data/*.json）：核对 + 陈旧提醒；没后端就一个请求都不发 ----
   const remoteData = await import('./remote-data.js');
+  const {mountSiteUpdates} = await import('./site-updates.js');
+  mountSiteUpdates(() => remoteData.checkRemoteData());
   remoteData.mountDataStatusPanel(document.getElementById('dataStatusRoot'));
   // 延迟到启动完成之后再检查，别和 Pyodide 抢带宽；失败也只是静默
   setTimeout(() => {
