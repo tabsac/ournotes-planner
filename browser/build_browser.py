@@ -364,8 +364,10 @@ def main():
     #    真机取证与复现步骤见 tools/mobile/README.md 与设计笔记 2j④。
     html = replace_once(html, '<head>', '<head><meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\' \'unsafe-eval\'; worker-src \'self\' blob:; img-src \'self\' data:; connect-src \'self\' blob:; object-src \'none\'; base-uri \'self\';">')
     html = inject_cloud_config(html)
-    html = replace_once(html, '<title>', '<link rel="icon" href="./favicon.svg"><title>')
-    (PUBLIC / "favicon.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="16" fill="#7667de"/><path d="M32 8 38 26 56 32 38 38 32 56 26 38 8 32 26 26Z" fill="white"/></svg>', "utf-8")
+    icon_source = HERE / "favicon.ico"
+    icon_version = __import__("hashlib").sha256(icon_source.read_bytes()).hexdigest()[:12]
+    shutil.copyfile(icon_source, PUBLIC / "favicon.ico")
+    html = replace_once(html, '<title>', f'<link rel="icon" type="image/x-icon" href="./favicon.ico?v={icon_version}"><title>')
     html = html.replace("OUR NOTES / LOCAL PLANNER", "OUR NOTES / BROWSER PLANNER").replace("本地运行", "浏览器计算")
     html = replace_once(html, '<div id="loadError"', '<div id="browserLoading" class="notice" role="status" aria-live="polite">正在准备浏览器计算组件，首次打开需要下载，请稍候…</div>\n <div id="loadError"')
     html = html.replace('data-tab="software">软件更新', 'data-tab="software">关于网页版')

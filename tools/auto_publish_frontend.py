@@ -9,7 +9,7 @@ assert master['contentVersion'] and version['counts']['charts']==version['counts
 # A version may contain a future event: reevaluate the current event every run.
 sys.path.insert(0,str(ROOT/'browser'));from snapshot_release import current_event
 event=current_event(json.loads((INCOMING/'master/MasterEvent.json').read_text())['_allData'])['_id']
-source_hash=hashlib.sha256(b''.join(p.read_bytes() for p in sorted((ROOT/'browser').glob('*')) if p.suffix in ['.py','.js','.css'] and p.name not in ['generated-app.js','activity-model.js','image-version.js','style.css']) + b''.join((ROOT/'tools'/name).read_bytes() for name in ['auto_publish_frontend.py','sync_decoded_master.py','validate_snapshot_release.py'])).hexdigest()
+source_hash=hashlib.sha256(b''.join(p.read_bytes() for p in sorted((ROOT/'browser').glob('*')) if p.suffix in ['.py','.js','.css','.ico'] and p.name not in ['generated-app.js','activity-model.js','image-version.js','style.css']) + b''.join((ROOT/'tools'/name).read_bytes() for name in ['auto_publish_frontend.py','sync_decoded_master.py','validate_snapshot_release.py'])).hexdigest()
 fingerprint=hashlib.sha256(json.dumps({'master':master['resourceVersion'],'data':version.get('contentDigests'),'event':event,'source':source_hash},sort_keys=True).encode()).hexdigest()
 receipt=ROOT/'last-published.json'
 if receipt.exists() and json.loads(receipt.read_text())['fingerprint']==fingerprint:
